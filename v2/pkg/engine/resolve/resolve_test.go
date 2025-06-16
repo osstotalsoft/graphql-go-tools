@@ -4655,9 +4655,12 @@ type SubscriptionRecorder struct {
 	buf      *bytes.Buffer
 	messages []string
 	complete atomic.Bool
+	closed   atomic.Bool
 	mux      sync.Mutex
 	onFlush  func(p []byte)
 }
+
+var _ SubscriptionResponseWriter = (*SubscriptionRecorder)(nil)
 
 func (s *SubscriptionRecorder) AwaitMessages(t *testing.T, count int, timeout time.Duration) {
 	t.Helper()
@@ -4707,6 +4710,20 @@ func (s *SubscriptionRecorder) AwaitComplete(t *testing.T, timeout time.Duration
 	}
 }
 
+func (s *SubscriptionRecorder) AwaitClosed(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if s.closed.Load() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for close")
+		}
+		time.Sleep(time.Millisecond * 10)
+	}
+}
+
 func (s *SubscriptionRecorder) Write(p []byte) (n int, err error) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
@@ -4723,6 +4740,10 @@ func (s *SubscriptionRecorder) Flush() error {
 
 func (s *SubscriptionRecorder) Complete() {
 	s.complete.Store(true)
+}
+
+func (s *SubscriptionRecorder) Close(_ SubscriptionCloseKind) {
+	s.closed.Store(true)
 }
 
 func (s *SubscriptionRecorder) Messages() []string {
@@ -4782,7 +4803,7 @@ func (f *_fakeStream) Start(ctx *Context, input []byte, updater SubscriptionUpda
 		for {
 			select {
 			case <-ctx.ctx.Done():
-				updater.Done()
+				updater.Complete()
 				f.isDone.Store(true)
 				return
 			default:
@@ -4790,7 +4811,7 @@ func (f *_fakeStream) Start(ctx *Context, input []byte, updater SubscriptionUpda
 				updater.Update([]byte(message))
 				if done {
 					time.Sleep(f.delay)
-					updater.Done()
+					updater.Complete()
 					f.isDone.Store(true)
 					return
 				}
@@ -5206,7 +5227,7 @@ func TestResolver_ResolveGraphQLSubscription(t *testing.T) {
 		recorder.AwaitAnyMessageCount(t, defaultTimeout)
 		err = resolver.AsyncUnsubscribeSubscription(id)
 		assert.NoError(t, err)
-		recorder.AwaitComplete(t, defaultTimeout)
+		recorder.AwaitClosed(t, defaultTimeout)
 		fakeStream.AwaitIsDone(t, defaultTimeout)
 	})
 
@@ -5231,7 +5252,7 @@ func TestResolver_ResolveGraphQLSubscription(t *testing.T) {
 		recorder.AwaitAnyMessageCount(t, defaultTimeout)
 		err = resolver.AsyncUnsubscribeClient(id.ConnectionID)
 		assert.NoError(t, err)
-		recorder.AwaitComplete(t, defaultTimeout)
+		recorder.AwaitClosed(t, defaultTimeout)
 		fakeStream.AwaitIsDone(t, defaultTimeout)
 	})
 
@@ -5375,7 +5396,7 @@ func TestResolver_ResolveGraphQLSubscription(t *testing.T) {
 
 		err = resolver.AsyncUnsubscribeSubscription(id)
 		assert.NoError(t, err)
-		recorder.AwaitComplete(t, defaultTimeout)
+		recorder.AwaitClosed(t, defaultTimeout)
 		fakeStream.AwaitIsDone(t, defaultTimeout)
 	})
 }

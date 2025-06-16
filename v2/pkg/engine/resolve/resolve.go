@@ -275,6 +275,14 @@ type trigger struct {
 	initialized bool
 }
 
+// workItem is used to encapsulate a function that needs to be
+// executed in the worker goroutine. fn will be executed, and if
+// final is true the worker will be stopped after fn is executed.
+type workItem struct {
+	fn    func()
+	final bool
+}
+
 type sub struct {
 	resolve   *GraphQLSubscription
 	resolver  *Resolver
@@ -284,7 +292,7 @@ type sub struct {
 	heartbeat bool
 	completed chan struct{}
 	// workChan is used to send work to the writer goroutine. All work is processed sequentially.
-	workChan chan func()
+	workChan chan workItem
 }
 
 // startWorker runs in its own goroutine to process fetches and write data to the client synchronously
@@ -316,12 +324,13 @@ func (s *sub) startWorkerWithHeartbeat() {
 			return
 		case <-heartbeatTicker.C:
 			s.resolver.handleHeartbeat(s, multipartHeartbeat)
-		case fn, ok := <-s.workChan:
-			if !ok {
-				s.complete()
+		case work := <-s.workChan:
+			work.fn()
+
+			if work.final {
 				return
 			}
-			fn()
+
 			// Reset the heartbeat ticker after each write to avoid sending unnecessary heartbeats
 			heartbeatTicker.Reset(s.resolver.heartbeatInterval)
 		}
@@ -329,7 +338,6 @@ func (s *sub) startWorkerWithHeartbeat() {
 }
 
 func (s *sub) startWorkerWithoutHeartbeat() {
-
 	for {
 		select {
 		case <-s.ctx.ctx.Done():
@@ -339,16 +347,17 @@ func (s *sub) startWorkerWithoutHeartbeat() {
 		case <-s.resolver.ctx.Done():
 			// Abort immediately if the resolver is shutting down
 			return
-		case fn, ok := <-s.workChan:
-			if !ok {
-				s.complete()
+		case work := <-s.workChan:
+			work.fn()
+
+			if work.final {
 				return
 			}
-			fn()
 		}
 	}
 }
 
+// Called when subgraph indicates a "complete" subscription
 func (s *sub) complete() {
 	// The channel is used to communicate that the subscription is done
 	// It is used only in the synchronous subscription case and to avoid sending events
@@ -356,6 +365,16 @@ func (s *sub) complete() {
 	defer close(s.completed)
 
 	s.writer.Complete()
+}
+
+// Called when subgraph becomes unreachable or closes the connection without a "complete" event
+func (s *sub) close(kind SubscriptionCloseKind) {
+	// The channel is used to communicate that the subscription is done
+	// It is used only in the synchronous subscription case and to avoid sending events
+	// to a subscription that is already done.
+	defer close(s.completed)
+
+	s.writer.Close(kind)
 }
 
 func (r *Resolver) executeSubscriptionUpdate(resolveCtx *Context, sub *sub, sharedInput []byte) {
@@ -454,16 +473,18 @@ func (r *Resolver) handleEvent(event subscriptionEvent) {
 		r.handleAddSubscription(event.triggerID, event.addSubscription)
 	case subscriptionEventKindRemoveSubscription:
 		r.handleRemoveSubscription(event.id)
+	case subscriptionEventKindCompleteSubscription:
+		r.handleCompleteSubscription(event.id)
 	case subscriptionEventKindRemoveClient:
 		r.handleRemoveClient(event.id.ConnectionID)
 	case subscriptionEventKindTriggerUpdate:
 		r.handleTriggerUpdate(event.triggerID, event.data)
-	case subscriptionEventKindTriggerDone:
-		r.handleTriggerDone(event.triggerID)
+	case subscriptionEventKindTriggerComplete:
+		r.handleTriggerComplete(event.triggerID)
 	case subscriptionEventKindTriggerInitialized:
 		r.handleTriggerInitialized(event.triggerID)
-	case subscriptionEventKindTriggerShutdown:
-		r.handleTriggerShutdown(event)
+	case subscriptionEventKindTriggerClose:
+		r.handleTriggerClose(event)
 	case subscriptionEventKindUnknown:
 		panic("unknown event")
 	}
@@ -510,12 +531,12 @@ func (r *Resolver) handleHeartbeat(sub *sub, data []byte) {
 	}
 }
 
-func (r *Resolver) handleTriggerShutdown(s subscriptionEvent) {
+func (r *Resolver) handleTriggerClose(s subscriptionEvent) {
 	if r.options.Debug {
 		fmt.Printf("resolver:trigger:shutdown:%d:%d\n", s.triggerID, s.id.SubscriptionID)
 	}
 
-	r.shutdownTrigger(s.triggerID)
+	r.closeTrigger(s.triggerID, s.closeKind)
 }
 
 func (r *Resolver) handleTriggerInitialized(triggerID uint64) {
@@ -530,8 +551,12 @@ func (r *Resolver) handleTriggerInitialized(triggerID uint64) {
 	}
 }
 
-func (r *Resolver) handleTriggerDone(triggerID uint64) {
-	r.shutdownTrigger(triggerID)
+func (r *Resolver) handleTriggerComplete(triggerID uint64) {
+	if r.options.Debug {
+		fmt.Printf("resolver:trigger:complete:%d\n", triggerID)
+	}
+
+	r.completeTrigger(triggerID)
 }
 
 func (r *Resolver) handleAddSubscription(triggerID uint64, add *addSubscription) {
@@ -547,7 +572,7 @@ func (r *Resolver) handleAddSubscription(triggerID uint64, add *addSubscription)
 		writer:    add.writer,
 		id:        add.id,
 		completed: add.completed,
-		workChan:  make(chan func(), 32),
+		workChan:  make(chan workItem, 32),
 		resolver:  r,
 	}
 
@@ -618,7 +643,7 @@ func (r *Resolver) handleAddSubscription(triggerID uint64, add *addSubscription)
 				fmt.Printf("resolver:trigger:failed:%d\n", triggerID)
 			}
 			r.asyncErrorWriter.WriteError(add.ctx, err, add.resolve.Response, add.writer)
-			_ = r.emitTriggerShutdown(triggerID)
+			_ = r.emitTriggerClose(triggerID)
 			return
 		}
 
@@ -631,7 +656,7 @@ func (r *Resolver) handleAddSubscription(triggerID uint64, add *addSubscription)
 
 }
 
-func (r *Resolver) emitTriggerShutdown(triggerID uint64) error {
+func (r *Resolver) emitTriggerClose(triggerID uint64) error {
 	if r.options.Debug {
 		fmt.Printf("resolver:trigger:shutdown:%d\n", triggerID)
 	}
@@ -641,7 +666,8 @@ func (r *Resolver) emitTriggerShutdown(triggerID uint64) error {
 		return r.ctx.Err()
 	case r.events <- subscriptionEvent{
 		triggerID: triggerID,
-		kind:      subscriptionEventKindTriggerShutdown,
+		kind:      subscriptionEventKindTriggerClose,
+		closeKind: SubscriptionCloseKindNormal,
 	}:
 	}
 
@@ -665,6 +691,25 @@ func (r *Resolver) emitTriggerInitialized(triggerID uint64) error {
 	return nil
 }
 
+func (r *Resolver) handleCompleteSubscription(id SubscriptionIdentifier) {
+	if r.options.Debug {
+		fmt.Printf("resolver:trigger:subscription:remove:%d:%d\n", id.ConnectionID, id.SubscriptionID)
+	}
+	removed := 0
+	for u := range r.triggers {
+		trig := r.triggers[u]
+		removed += r.completeTriggerSubscriptions(u, func(sID SubscriptionIdentifier) bool {
+			return sID == id
+		})
+		if len(trig.subscriptions) == 0 {
+			r.completeTrigger(trig.id)
+		}
+	}
+	if r.reporter != nil {
+		r.reporter.SubscriptionCountDec(removed)
+	}
+}
+
 func (r *Resolver) handleRemoveSubscription(id SubscriptionIdentifier) {
 	if r.options.Debug {
 		fmt.Printf("resolver:trigger:subscription:remove:%d:%d\n", id.ConnectionID, id.SubscriptionID)
@@ -672,11 +717,11 @@ func (r *Resolver) handleRemoveSubscription(id SubscriptionIdentifier) {
 	removed := 0
 	for u := range r.triggers {
 		trig := r.triggers[u]
-		removed += r.shutdownTriggerSubscriptions(u, func(sID SubscriptionIdentifier) bool {
+		removed += r.closeTriggerSubscriptions(u, SubscriptionCloseKindNormal, func(sID SubscriptionIdentifier) bool {
 			return sID == id
 		})
 		if len(trig.subscriptions) == 0 {
-			r.shutdownTrigger(trig.id)
+			r.closeTrigger(trig.id, SubscriptionCloseKindNormal)
 		}
 	}
 	if r.reporter != nil {
@@ -690,11 +735,11 @@ func (r *Resolver) handleRemoveClient(id int64) {
 	}
 	removed := 0
 	for u := range r.triggers {
-		removed += r.shutdownTriggerSubscriptions(u, func(sID SubscriptionIdentifier) bool {
+		removed += r.closeTriggerSubscriptions(u, SubscriptionCloseKindNormal, func(sID SubscriptionIdentifier) bool {
 			return sID.ConnectionID == id
 		})
 		if len(r.triggers[u].subscriptions) == 0 {
-			r.shutdownTrigger(r.triggers[u].id)
+			r.closeTrigger(r.triggers[u].id, SubscriptionCloseKindNormal)
 		}
 	}
 	if r.reporter != nil {
@@ -735,31 +780,27 @@ func (r *Resolver) handleTriggerUpdate(id uint64, data []byte) {
 			return
 		case <-c.ctx.Done():
 			// Skip sending the event if the client disconnected
-		case s.workChan <- fn:
+		case s.workChan <- workItem{fn, false}:
 			// Send the event to the subscription worker
 		}
 	}
 }
 
-func (r *Resolver) shutdownTrigger(id uint64) {
+func (r *Resolver) closeTrigger(id uint64, kind SubscriptionCloseKind) {
 	if r.options.Debug {
-		fmt.Printf("resolver:trigger:shutdown:%d\n", id)
+		fmt.Printf("resolver:trigger:close:%d\n", id)
 	}
 	trig, ok := r.triggers[id]
 	if !ok {
 		return
 	}
 
-	removed := r.shutdownTriggerSubscriptions(id, nil)
+	removed := r.closeTriggerSubscriptions(id, kind, nil)
 
 	// Cancels the async datasource and cleanup the connection
 	trig.cancel()
 
 	delete(r.triggers, id)
-
-	if r.options.Debug {
-		fmt.Printf("resolver:trigger:done:%d\n", trig.id)
-	}
 
 	if r.reporter != nil {
 		r.reporter.SubscriptionCountDec(removed)
@@ -769,17 +810,44 @@ func (r *Resolver) shutdownTrigger(id uint64) {
 	}
 }
 
-func (r *Resolver) shutdownTriggerSubscriptions(id uint64, shutdownMatcher func(a SubscriptionIdentifier) bool) int {
+func (r *Resolver) completeTrigger(id uint64) {
+	if r.options.Debug {
+		fmt.Printf("resolver:trigger:complete:%d\n", id)
+	}
+
+	trig, ok := r.triggers[id]
+	if !ok {
+		return
+	}
+
+	removed := r.completeTriggerSubscriptions(id, nil)
+
+	// Cancels the async datasource and cleanup the connection
+	trig.cancel()
+
+	delete(r.triggers, id)
+
+	if r.reporter != nil {
+		r.reporter.SubscriptionCountDec(removed)
+		if trig.initialized {
+			r.reporter.TriggerCountDec(1)
+		}
+	}
+}
+
+func (r *Resolver) completeTriggerSubscriptions(id uint64, completeMatcher func(a SubscriptionIdentifier) bool) int {
 	trig, ok := r.triggers[id]
 	if !ok {
 		return 0
 	}
 	removed := 0
 	for c, s := range trig.subscriptions {
-
-		if shutdownMatcher != nil && !shutdownMatcher(s.id) {
+		if completeMatcher != nil && !completeMatcher(s.id) {
 			continue
 		}
+
+		// Send a work item to complete the subscription
+		s.workChan <- workItem{s.complete, true}
 
 		// Because the event loop is single threaded, we can safely close the channel from this sender
 		// The subscription worker will finish processing all events before the channel is closed.
@@ -790,7 +858,38 @@ func (r *Resolver) shutdownTriggerSubscriptions(id uint64, shutdownMatcher func(
 		delete(trig.subscriptions, c)
 
 		if r.options.Debug {
-			fmt.Printf("resolver:trigger:subscription:done:%d:%d\n", trig.id, s.id.SubscriptionID)
+			fmt.Printf("resolver:trigger:subscription:closed:%d:%d\n", trig.id, s.id.SubscriptionID)
+		}
+
+		removed++
+	}
+	return removed
+}
+
+func (r *Resolver) closeTriggerSubscriptions(id uint64, closeKind SubscriptionCloseKind, closeMatcher func(a SubscriptionIdentifier) bool) int {
+	trig, ok := r.triggers[id]
+	if !ok {
+		return 0
+	}
+	removed := 0
+	for c, s := range trig.subscriptions {
+		if closeMatcher != nil && !closeMatcher(s.id) {
+			continue
+		}
+
+		// Send a work item to close the subscription
+		s.workChan <- workItem{func() { s.close(closeKind) }, true}
+
+		// Because the event loop is single threaded, we can safely close the channel from this sender
+		// The subscription worker will finish processing all events before the channel is closed.
+		close(s.workChan)
+
+		// Important because we remove the subscription from the trigger on the same goroutine
+		// as we send work to the subscription worker. We can ensure that no new work is sent to the worker after this point.
+		delete(trig.subscriptions, c)
+
+		if r.options.Debug {
+			fmt.Printf("resolver:trigger:subscription:closed:%d:%d\n", trig.id, s.id.SubscriptionID)
 		}
 
 		removed++
@@ -803,7 +902,7 @@ func (r *Resolver) handleShutdown() {
 		fmt.Printf("resolver:trigger:shutdown\n")
 	}
 	for id := range r.triggers {
-		r.shutdownTrigger(id)
+		r.closeTrigger(id, SubscriptionCloseKindGoingAway)
 	}
 	if r.options.Debug {
 		fmt.Printf("resolver:trigger:shutdown:done\n")
@@ -814,6 +913,18 @@ func (r *Resolver) handleShutdown() {
 type SubscriptionIdentifier struct {
 	ConnectionID   int64
 	SubscriptionID int64
+}
+
+func (r *Resolver) AsyncCompleteSubscription(id SubscriptionIdentifier) error {
+	select {
+	case <-r.ctx.Done():
+		return r.ctx.Err()
+	case r.events <- subscriptionEvent{
+		id:   id,
+		kind: subscriptionEventKindCompleteSubscription,
+	}:
+	}
+	return nil
 }
 
 func (r *Resolver) AsyncUnsubscribeSubscription(id SubscriptionIdentifier) error {
@@ -1064,19 +1175,48 @@ func (s *subscriptionUpdater) Update(data []byte) {
 	}
 }
 
-func (s *subscriptionUpdater) Done() {
+func (s *subscriptionUpdater) Complete() {
 	if s.debug {
-		fmt.Printf("resolver:subscription_updater:done:%d\n", s.triggerID)
+		fmt.Printf("resolver:subscription_updater:complete:%d\n", s.triggerID)
 	}
 
 	select {
 	case <-s.ctx.Done():
 		// Skip sending events if trigger is already done
+		if s.debug {
+			fmt.Printf("resolver:subscription_updater:complete:skip:%d\n", s.triggerID)
+		}
 		return
 	case s.ch <- subscriptionEvent{
 		triggerID: s.triggerID,
-		kind:      subscriptionEventKindTriggerDone,
+		kind:      subscriptionEventKindTriggerComplete,
 	}:
+		if s.debug {
+			fmt.Printf("resolver:subscription_updater:complete:sent_event:%d\n", s.triggerID)
+		}
+	}
+}
+
+func (s *subscriptionUpdater) Close(kind SubscriptionCloseKind) {
+	if s.debug {
+		fmt.Printf("resolver:subscription_updater:close:%d\n", s.triggerID)
+	}
+
+	select {
+	case <-s.ctx.Done():
+		// Skip sending events if trigger is already done
+		if s.debug {
+			fmt.Printf("resolver:subscription_updater:close:skip:%d\n", s.triggerID)
+		}
+		return
+	case s.ch <- subscriptionEvent{
+		triggerID: s.triggerID,
+		kind:      subscriptionEventKindTriggerClose,
+		closeKind: kind,
+	}:
+		if s.debug {
+			fmt.Printf("resolver:subscription_updater:close:sent_event:%d\n", s.triggerID)
+		}
 	}
 }
 
@@ -1086,6 +1226,7 @@ type subscriptionEvent struct {
 	kind            subscriptionEventKind
 	data            []byte
 	addSubscription *addSubscription
+	closeKind       SubscriptionCloseKind
 }
 
 type addSubscription struct {
@@ -1102,17 +1243,20 @@ type subscriptionEventKind int
 const (
 	subscriptionEventKindUnknown subscriptionEventKind = iota
 	subscriptionEventKindTriggerUpdate
-	subscriptionEventKindTriggerDone
+	subscriptionEventKindTriggerComplete
 	subscriptionEventKindAddSubscription
 	subscriptionEventKindRemoveSubscription
+	subscriptionEventKindCompleteSubscription
 	subscriptionEventKindRemoveClient
 	subscriptionEventKindTriggerInitialized
-	subscriptionEventKindTriggerShutdown
+	subscriptionEventKindTriggerClose
 )
 
 type SubscriptionUpdater interface {
 	// Update sends an update to the client. It is not guaranteed that the update is sent immediately.
 	Update(data []byte)
-	// Done also takes care of cleaning up the trigger and all subscriptions. No more updates should be sent after calling Done.
-	Done()
+	// Complete also takes care of cleaning up the trigger and all subscriptions. No more updates should be sent after calling Complete.
+	Complete()
+	// Close closes the subscription and cleans up the trigger and all subscriptions. No more updates should be sent after calling Close.
+	Close(kind SubscriptionCloseKind)
 }

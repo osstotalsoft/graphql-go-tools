@@ -1,5 +1,71 @@
 # Changelog
 
+## [2.0.0-rc.190](https://github.com/wundergraph/graphql-go-tools/compare/v2.0.0-rc.189...v2.0.0-rc.190) (2025-06-13)
+
+
+### Bug Fixes
+
+* handling nested abstract fragments in abstract fragments ([#1184](https://github.com/wundergraph/graphql-go-tools/issues/1184)) ([c3321d3](https://github.com/wundergraph/graphql-go-tools/commit/c3321d3cd72b63fbf5d7d949d70fd6dfeb73e2e1))
+
+## [2.0.0-rc.189](https://github.com/wundergraph/graphql-go-tools/compare/v2.0.0-rc.188...v2.0.0-rc.189) (2025-06-12)
+
+
+### Features
+
+* expose parsed data in RenderFieldValue ([#1182](https://github.com/wundergraph/graphql-go-tools/issues/1182)) ([893c536](https://github.com/wundergraph/graphql-go-tools/commit/893c5366239362af68e0258c5987e7be24d286cb))
+
+
+### Bug Fixes
+
+* prefer websocket tws when negotiate graphql websocket protocol ([#1185](https://github.com/wundergraph/graphql-go-tools/issues/1185)) ([0787d7c](https://github.com/wundergraph/graphql-go-tools/commit/0787d7c8431fe840396e7b5b8e2aa47f1cd94ead))
+
+## [2.0.0-rc.188](https://github.com/wundergraph/graphql-go-tools/compare/v2.0.0-rc.187...v2.0.0-rc.188) (2025-06-11)
+
+
+### Features
+
+* improve apollo gateway compatible field selection validation ([#1169](https://github.com/wundergraph/graphql-go-tools/issues/1169)) ([8c1a063](https://github.com/wundergraph/graphql-go-tools/commit/8c1a06302309b5c3ad36f908cc8acbbc0bfafda6))
+
+## [2.0.0-rc.187](https://github.com/wundergraph/graphql-go-tools/compare/v2.0.0-rc.186...v2.0.0-rc.187) (2025-06-10)
+
+
+### Bug Fixes
+
+* support different kinds of close, correct client unsubscribe behaviour ([#1174](https://github.com/wundergraph/graphql-go-tools/issues/1174)) ([b6de322](https://github.com/wundergraph/graphql-go-tools/commit/b6de32263b69902c1f687b7b3fbf89e90df85cd2))
+
+## [2.0.0-rc.186](https://github.com/wundergraph/graphql-go-tools/compare/v2.0.0-rc.185...v2.0.0-rc.186) (2025-06-05)
+
+
+### Bug Fixes
+
+* upgrade golang/net version and dependencies ([#1173](https://github.com/wundergraph/graphql-go-tools/issues/1173)) ([1e889dd](https://github.com/wundergraph/graphql-go-tools/commit/1e889dd3d79385db80f2a66fec70c9aef3423d76))
+
+## [2.0.0-rc.185](https://github.com/wundergraph/graphql-go-tools/compare/v2.0.0-rc.184...v2.0.0-rc.185) (2025-06-04)
+
+
+### Features
+
+* differentiate between complete and close event types ([#1158](https://github.com/wundergraph/graphql-go-tools/issues/1158)) ([79f3f41](https://github.com/wundergraph/graphql-go-tools/commit/79f3f411b4101b0cdb29c2e5f075b8efe14fa6d8))
+
+## [2.0.0-rc.184](https://github.com/wundergraph/graphql-go-tools/compare/v2.0.0-rc.183...v2.0.0-rc.184) (2025-06-03)
+
+
+### Features
+
+* add custom field renderer to resolvable ([#1166](https://github.com/wundergraph/graphql-go-tools/issues/1166)) ([eaa5e60](https://github.com/wundergraph/graphql-go-tools/commit/eaa5e60cd1687593d538f33a914d0a6c1acace9b))
+
+
+### Bug Fixes
+
+* usage of unions fragments in union/object selection set ([#1165](https://github.com/wundergraph/graphql-go-tools/issues/1165)) ([c78c7e8](https://github.com/wundergraph/graphql-go-tools/commit/c78c7e828bef8fd80dbd4a3b47bd7ec910a5eb0b))
+
+## [2.0.0-rc.183](https://github.com/wundergraph/graphql-go-tools/compare/v2.0.0-rc.182...v2.0.0-rc.183) (2025-05-28)
+
+
+### Features
+
+* use new negation regex matching for matching connections ([#1161](https://github.com/wundergraph/graphql-go-tools/issues/1161)) ([4f2fe65](https://github.com/wundergraph/graphql-go-tools/commit/4f2fe65ffcf51346b7907626767e5472f56c1b11))
+
 ## [2.0.0-rc.182](https://github.com/wundergraph/graphql-go-tools/compare/v2.0.0-rc.181...v2.0.0-rc.182) (2025-05-27)
 
 

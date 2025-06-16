@@ -23,8 +23,11 @@ type FakeSubscriptionWriter struct {
 	buf                    []byte
 	writtenMessages        []string
 	completed              bool
+	closed                 bool
 	messageCountOnComplete int
 }
+
+var _ SubscriptionResponseWriter = (*FakeSubscriptionWriter)(nil)
 
 func (f *FakeSubscriptionWriter) Write(p []byte) (n int, err error) {
 	f.mu.Lock()
@@ -48,6 +51,13 @@ func (f *FakeSubscriptionWriter) Complete() {
 	f.messageCountOnComplete = len(f.writtenMessages)
 }
 
+func (f *FakeSubscriptionWriter) Close(SubscriptionCloseKind) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = true
+	f.messageCountOnComplete = len(f.writtenMessages)
+}
+
 type FakeSource struct {
 	updates  []string
 	interval time.Duration
@@ -66,7 +76,7 @@ func (f *FakeSource) Start(ctx *Context, input []byte, updater SubscriptionUpdat
 				time.Sleep(f.interval)
 			}
 		}
-		updater.Done()
+		updater.Complete()
 	}()
 	return nil
 }
