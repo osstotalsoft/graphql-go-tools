@@ -7,7 +7,7 @@ import (
 
 type FetchTreeNode struct {
 	Kind FetchTreeNodeKind `json:"kind"`
-	// Only set for subscription
+	// Trigger is only set for subscription
 	Trigger         *FetchTreeNode   `json:"trigger"`
 	Item            *FetchItem       `json:"item"`
 	ChildNodes      []*FetchTreeNode `json:"child_nodes"`
@@ -42,6 +42,11 @@ func ObjectPath(path ...string) FetchItemPathElement {
 		Kind: FetchItemPathElementKindObject,
 		Path: path,
 	}
+}
+
+func PathElementWithTypeNames(element FetchItemPathElement, typeNames []string) FetchItemPathElement {
+	element.TypeNames = typeNames
+	return element
 }
 
 func ArrayPath(path ...string) FetchItemPathElement {
@@ -157,14 +162,15 @@ type FetchTreeQueryPlanNode struct {
 }
 
 type FetchTreeQueryPlan struct {
-	Kind              string           `json:"kind"`
-	Path              string           `json:"path,omitempty"`
-	SubgraphName      string           `json:"subgraphName"`
-	SubgraphID        string           `json:"subgraphId"`
-	FetchID           int              `json:"fetchId"`
-	DependsOnFetchIDs []int            `json:"dependsOnFetchIds,omitempty"`
-	Representations   []Representation `json:"representations,omitempty"`
-	Query             string           `json:"query,omitempty"`
+	Kind              string            `json:"kind"`
+	Path              string            `json:"path,omitempty"`
+	SubgraphName      string            `json:"subgraphName"`
+	SubgraphID        string            `json:"subgraphId"`
+	FetchID           int               `json:"fetchId"`
+	DependsOnFetchIDs []int             `json:"dependsOnFetchIds,omitempty"`
+	Representations   []Representation  `json:"representations,omitempty"`
+	Query             string            `json:"query,omitempty"`
+	Dependencies      []FetchDependency `json:"dependencies,omitempty"`
 }
 
 func (n *FetchTreeNode) QueryPlan() *FetchTreeQueryPlanNode {
@@ -209,9 +215,13 @@ func (n *FetchTreeNode) queryPlan() *FetchTreeQueryPlanNode {
 				DependsOnFetchIDs: f.FetchDependencies.DependsOnFetchIDs,
 				SubgraphName:      f.Info.DataSourceName,
 				SubgraphID:        f.Info.DataSourceID,
-				Query:             f.Info.QueryPlan.Query,
-				Representations:   f.Info.QueryPlan.DependsOnFields,
 				Path:              n.Item.ResponsePath,
+				Dependencies:      f.Info.CoordinateDependencies,
+			}
+
+			if f.Info.QueryPlan != nil {
+				queryPlan.Fetch.Query = f.Info.QueryPlan.Query
+				queryPlan.Fetch.Representations = f.Info.QueryPlan.DependsOnFields
 			}
 		case *EntityFetch:
 			queryPlan.Fetch = &FetchTreeQueryPlan{
@@ -220,9 +230,13 @@ func (n *FetchTreeNode) queryPlan() *FetchTreeQueryPlanNode {
 				DependsOnFetchIDs: f.FetchDependencies.DependsOnFetchIDs,
 				SubgraphName:      f.Info.DataSourceName,
 				SubgraphID:        f.Info.DataSourceID,
-				Query:             f.Info.QueryPlan.Query,
-				Representations:   f.Info.QueryPlan.DependsOnFields,
 				Path:              n.Item.ResponsePath,
+				Dependencies:      f.Info.CoordinateDependencies,
+			}
+
+			if f.Info.QueryPlan != nil {
+				queryPlan.Fetch.Query = f.Info.QueryPlan.Query
+				queryPlan.Fetch.Representations = f.Info.QueryPlan.DependsOnFields
 			}
 		case *BatchEntityFetch:
 			queryPlan.Fetch = &FetchTreeQueryPlan{
@@ -231,9 +245,13 @@ func (n *FetchTreeNode) queryPlan() *FetchTreeQueryPlanNode {
 				DependsOnFetchIDs: f.FetchDependencies.DependsOnFetchIDs,
 				SubgraphName:      f.Info.DataSourceName,
 				SubgraphID:        f.Info.DataSourceID,
-				Query:             f.Info.QueryPlan.Query,
-				Representations:   f.Info.QueryPlan.DependsOnFields,
 				Path:              n.Item.ResponsePath,
+				Dependencies:      f.Info.CoordinateDependencies,
+			}
+
+			if f.Info.QueryPlan != nil {
+				queryPlan.Fetch.Query = f.Info.QueryPlan.Query
+				queryPlan.Fetch.Representations = f.Info.QueryPlan.DependsOnFields
 			}
 		case *ParallelListItemFetch:
 			queryPlan.Fetch = &FetchTreeQueryPlan{
@@ -242,9 +260,12 @@ func (n *FetchTreeNode) queryPlan() *FetchTreeQueryPlanNode {
 				DependsOnFetchIDs: f.Fetch.FetchDependencies.DependsOnFetchIDs,
 				SubgraphName:      f.Fetch.Info.DataSourceName,
 				SubgraphID:        f.Fetch.Info.DataSourceID,
-				Query:             f.Fetch.Info.QueryPlan.Query,
-				Representations:   f.Fetch.Info.QueryPlan.DependsOnFields,
 				Path:              n.Item.ResponsePath,
+			}
+
+			if f.Fetch.Info.QueryPlan != nil {
+				queryPlan.Fetch.Query = f.Fetch.Info.QueryPlan.Query
+				queryPlan.Fetch.Representations = f.Fetch.Info.QueryPlan.DependsOnFields
 			}
 		default:
 		}
@@ -285,15 +306,42 @@ func (p *PlanPrinter) printPlanNode(plan *FetchTreeQueryPlanNode, increaseDepth 
 	case FetchTreeNodeKindSingle:
 		p.printFetchInfo(plan.Fetch)
 	case FetchTreeNodeKindSequence:
-		manyChilds := len(plan.Children) > 1
-		if manyChilds {
+		isSubscription := plan.Trigger != nil
+		hasChildren := len(plan.Children) > 0
+		// Special case for Subscriptions:
+		// "Primary" key has plan.Trigger. "Rest" has plan.Children
+		if isSubscription {
+			p.print("Subscription {")
+			p.depth++
+			p.print("Primary: {")
+			p.depth++
+			p.printFetchInfo(plan.Trigger)
+			p.depth--
+			p.print("},") // Primary
+			if hasChildren {
+				p.print("Rest: {")
+				p.depth++
+			}
+		}
+
+		isSequence := len(plan.Children) > 1
+		if isSequence {
 			p.print("Sequence {")
 		}
 		for _, child := range plan.Children {
-			p.printPlanNode(child, manyChilds)
+			p.printPlanNode(child, isSequence)
 		}
-		if manyChilds {
+		if isSequence {
 			p.print("}")
+		}
+
+		if isSubscription {
+			if hasChildren {
+				p.depth--
+				p.print("},") // Rest
+			}
+			p.depth--
+			p.print("}") // Subscription
 		}
 	case FetchTreeNodeKindParallel:
 		p.print("Parallel {")
@@ -330,8 +378,18 @@ func (p *PlanPrinter) printFetchInfo(fetch *FetchTreeQueryPlan) {
 	}
 }
 
+// printQuery replaces the first line of a query with "{" and prints into p.
+// It expects a multi-line formatted query. As a fallback for a single-line query,
+// it will print such a query as it is.
 func (p *PlanPrinter) printQuery(query string) {
+	if query == "" {
+		return
+	}
 	lines := strings.Split(query, "\n")
+	if len(lines) == 1 {
+		p.print(query)
+		return
+	}
 	lines[0] = "{"
 	lines[len(lines)-1] = "}"
 	p.print(lines...)

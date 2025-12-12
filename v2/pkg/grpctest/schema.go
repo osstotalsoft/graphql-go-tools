@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astparser"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/asttransform"
@@ -71,7 +72,7 @@ func GraphQLSchemaWithoutBaseDefinitions() (ast.Document, error) {
 	return doc, nil
 }
 
-func MustGraphQLSchema(t *testing.T) ast.Document {
+func MustGraphQLSchema(t testing.TB) ast.Document {
 	schemaBytes, err := getSchemaBytes()
 	require.NoError(t, err)
 	doc := unsafeparser.ParseGraphqlDocumentStringWithBaseSchema(string(schemaBytes))
@@ -94,7 +95,7 @@ func ProtoSchema() (string, error) {
 	return string(protoBytes), nil
 }
 
-func MustProtoSchema(t *testing.T) string {
+func MustProtoSchema(t testing.TB) string {
 	schema, err := ProtoSchema()
 	require.NoError(t, err)
 	return schema
@@ -196,6 +197,158 @@ func GetFieldConfigurations() plan.FieldConfigurations {
 				},
 			},
 		},
+		{
+			TypeName:  "Query",
+			FieldName: "search",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "input",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Query",
+			FieldName: "nullableFieldsTypeById",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "id",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Query",
+			FieldName: "nullableFieldsTypeWithFilter",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "filter",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Mutation",
+			FieldName: "performAction",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "input",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Mutation",
+			FieldName: "createNullableFieldsType",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "input",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Mutation",
+			FieldName: "updateNullableFieldsType",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "id",
+					SourceType: plan.FieldArgumentSource,
+				},
+				{
+					Name:       "input",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Query",
+			FieldName: "blogPostById",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "id",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Query",
+			FieldName: "blogPostsWithFilter",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "filter",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Query",
+			FieldName: "authorById",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "id",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Query",
+			FieldName: "authorsWithFilter",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "filter",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Mutation",
+			FieldName: "createBlogPost",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "input",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Mutation",
+			FieldName: "updateBlogPost",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "id",
+					SourceType: plan.FieldArgumentSource,
+				},
+				{
+					Name:       "input",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Mutation",
+			FieldName: "createAuthor",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "input",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
+		{
+			TypeName:  "Mutation",
+			FieldName: "updateAuthor",
+			Arguments: []plan.ArgumentConfiguration{
+				{
+					Name:       "id",
+					SourceType: plan.FieldArgumentSource,
+				},
+				{
+					Name:       "input",
+					SourceType: plan.FieldArgumentSource,
+				},
+			},
+		},
 	}
 }
 
@@ -219,6 +372,14 @@ func GetDataSourceMetadata() *plan.DataSourceMetadata {
 				},
 			},
 			{
+				TypeName: "Warehouse",
+				FieldNames: []string{
+					"id",
+					"name",
+					"location",
+				},
+			},
+			{
 				TypeName: "Query",
 				FieldNames: []string{
 					"users",
@@ -230,15 +391,38 @@ func GetDataSourceMetadata() *plan.DataSourceMetadata {
 					"complexFilterType",
 					"categories",
 					"categoriesByKind",
+					"categoriesByKinds",
 					"filterCategories",
 					"randomPet",
 					"allPets",
+					"search",
+					"calculateTotals",
+					"randomSearchResult",
+					"nullableFieldsType",
+					"nullableFieldsTypeById",
+					"nullableFieldsTypeWithFilter",
+					"allNullableFieldsTypes",
+					"blogPost",
+					"blogPostById",
+					"blogPostsWithFilter",
+					"allBlogPosts",
+					"author",
+					"authorById",
+					"authorsWithFilter",
+					"allAuthors",
 				},
 			},
 			{
 				TypeName: "Mutation",
 				FieldNames: []string{
 					"createUser",
+					"performAction",
+					"createNullableFieldsType",
+					"updateNullableFieldsType",
+					"createBlogPost",
+					"updateBlogPost",
+					"createAuthor",
+					"updateAuthor",
 				},
 			},
 		},
@@ -368,6 +552,254 @@ func GetDataSourceMetadata() *plan.DataSourceMetadata {
 					"productId",
 					"quantity",
 					"modifiers",
+				},
+			},
+			{
+				TypeName: "ActionInput",
+				FieldNames: []string{
+					"name",
+				},
+			},
+			{
+				TypeName: "Product",
+				FieldNames: []string{
+					"id",
+					"name",
+					"price",
+				},
+			},
+			{
+				TypeName: "Storage",
+				FieldNames: []string{
+					"id",
+					"name",
+					"location",
+				},
+			},
+			{
+				TypeName: "Warehouse",
+				FieldNames: []string{
+					"id",
+					"name",
+					"location",
+				},
+			},
+			{
+				TypeName: "FilterTypeInput",
+				FieldNames: []string{
+					"filterField1",
+					"filterField2",
+				},
+			},
+			{
+				TypeName: "FilterType",
+				FieldNames: []string{
+					"name",
+					"filterField1",
+					"filterField2",
+					"pagination",
+				},
+			},
+			{
+				TypeName: "Pagination",
+				FieldNames: []string{
+					"page",
+					"perPage",
+				},
+			},
+			{
+				TypeName: "ComplexFilterTypeInput",
+				FieldNames: []string{
+					"filter",
+				},
+			},
+			{
+				TypeName: "OrderLineInput",
+				FieldNames: []string{
+					"productId",
+					"quantity",
+					"modifiers",
+				},
+			},
+			{
+				TypeName: "OrderInput",
+				FieldNames: []string{
+					"orderId",
+					"customerName",
+					"lines",
+				},
+			},
+			{
+				TypeName: "ActionSuccess",
+				FieldNames: []string{
+					"message",
+					"timestamp",
+				},
+			},
+			{
+				TypeName: "ActionError",
+				FieldNames: []string{
+					"message",
+					"code",
+				},
+			},
+			{
+				TypeName: "SearchInput",
+				FieldNames: []string{
+					"query",
+					"limit",
+				},
+			},
+			{
+				TypeName: "SearchResult",
+				FieldNames: []string{
+					"product",
+					"user",
+					"category",
+				},
+			},
+			{
+				TypeName: "ActionResult",
+				FieldNames: []string{
+					"actionSuccess",
+					"actionError",
+				},
+			},
+			{
+				TypeName: "NullableFieldsType",
+				FieldNames: []string{
+					"id",
+					"name",
+					"optionalString",
+					"optionalInt",
+					"optionalFloat",
+					"optionalBoolean",
+					"requiredString",
+					"requiredInt",
+				},
+			},
+			{
+				TypeName: "NullableFieldsInput",
+				FieldNames: []string{
+					"name",
+					"optionalString",
+					"optionalInt",
+					"optionalFloat",
+					"optionalBoolean",
+					"requiredString",
+					"requiredInt",
+				},
+			},
+			{
+				TypeName: "NullableFieldsFilter",
+				FieldNames: []string{
+					"name",
+					"optionalString",
+					"includeNulls",
+				},
+			},
+			{
+				TypeName: "BlogPost",
+				FieldNames: []string{
+					"id",
+					"title",
+					"content",
+					"tags",
+					"optionalTags",
+					"categories",
+					"keywords",
+					"viewCounts",
+					"ratings",
+					"isPublished",
+					"tagGroups",
+					"relatedTopics",
+					"commentThreads",
+					"suggestions",
+					"relatedCategories",
+					"contributors",
+					"mentionedProducts",
+					"mentionedUsers",
+					"categoryGroups",
+					"contributorTeams",
+				},
+			},
+			{
+				TypeName: "Author",
+				FieldNames: []string{
+					"id",
+					"name",
+					"email",
+					"skills",
+					"languages",
+					"socialLinks",
+					"teamsByProject",
+					"collaborations",
+					"writtenPosts",
+					"favoriteCategories",
+					"relatedAuthors",
+					"productReviews",
+					"authorGroups",
+					"categoryPreferences",
+					"projectTeams",
+				},
+			},
+			{
+				TypeName: "BlogPostInput",
+				FieldNames: []string{
+					"title",
+					"content",
+					"tags",
+					"optionalTags",
+					"categories",
+					"keywords",
+					"viewCounts",
+					"ratings",
+					"isPublished",
+					"tagGroups",
+					"relatedTopics",
+					"commentThreads",
+					"suggestions",
+					"relatedCategories",
+					"contributors",
+					"categoryGroups",
+				},
+			},
+			{
+				TypeName: "AuthorInput",
+				FieldNames: []string{
+					"name",
+					"email",
+					"skills",
+					"languages",
+					"socialLinks",
+					"teamsByProject",
+					"collaborations",
+					"favoriteCategories",
+					"authorGroups",
+					"projectTeams",
+				},
+			},
+			{
+				TypeName: "BlogPostFilter",
+				FieldNames: []string{
+					"title",
+					"hasCategories",
+					"minTags",
+				},
+			},
+			{
+				TypeName: "AuthorFilter",
+				FieldNames: []string{
+					"name",
+					"hasTeams",
+					"skillCount",
+				},
+			},
+			{
+				TypeName: "CategoryInput",
+				FieldNames: []string{
+					"name",
+					"kind",
 				},
 			},
 		},

@@ -16,9 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/cespare/xxhash/v2"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -283,6 +282,7 @@ func TestGraphQLDataSource(t *testing.T) {
 						Name: []byte("stringList"),
 						Value: &resolve.Array{
 							Nullable: true,
+							Path:     []string{"stringList"},
 							Item: &resolve.String{
 								Nullable: true,
 							},
@@ -350,11 +350,6 @@ func TestGraphQLDataSource(t *testing.T) {
 						SourceType: plan.FieldArgumentSource,
 					},
 				},
-			},
-			{
-				TypeName:              "Query",
-				FieldName:             "stringList",
-				DisableDefaultMapping: true,
 			},
 			{
 				TypeName:  "Query",
@@ -590,6 +585,7 @@ func TestGraphQLDataSource(t *testing.T) {
 						Name: []byte("stringList"),
 						Value: &resolve.Array{
 							Nullable: true,
+							Path:     []string{"stringList"},
 							Item: &resolve.String{
 								Nullable: true,
 							},
@@ -677,11 +673,6 @@ func TestGraphQLDataSource(t *testing.T) {
 						SourceType: plan.FieldArgumentSource,
 					},
 				},
-			},
-			{
-				TypeName:              "Query",
-				FieldName:             "stringList",
-				DisableDefaultMapping: true,
 			},
 			{
 				TypeName:  "Query",
@@ -1700,6 +1691,7 @@ func TestGraphQLDataSource(t *testing.T) {
 						Name: []byte("stringList"),
 						Value: &resolve.Array{
 							Nullable: true,
+							Path:     []string{"stringList"},
 							Item: &resolve.String{
 								Nullable: true,
 							},
@@ -1767,11 +1759,6 @@ func TestGraphQLDataSource(t *testing.T) {
 						SourceType: plan.FieldArgumentSource,
 					},
 				},
-			},
-			{
-				TypeName:              "Query",
-				FieldName:             "stringList",
-				DisableDefaultMapping: true,
 			},
 			{
 				TypeName:  "Query",
@@ -2529,6 +2516,7 @@ func TestGraphQLDataSource(t *testing.T) {
 						{
 							Name: []byte("addFriend"),
 							Value: &resolve.Object{
+								Path: []string{"addFriend"},
 								PossibleTypes: map[string]struct{}{
 									"Friend": {},
 								},
@@ -2590,9 +2578,8 @@ func TestGraphQLDataSource(t *testing.T) {
 			},
 			Fields: []plan.FieldConfiguration{
 				{
-					TypeName:              "Mutation",
-					FieldName:             "addFriend",
-					DisableDefaultMapping: true,
+					TypeName:  "Mutation",
+					FieldName: "addFriend",
 					Arguments: []plan.ArgumentConfiguration{
 						{
 							Name:       "name",
@@ -4019,7 +4006,7 @@ func TestGraphQLDataSource(t *testing.T) {
 				Trigger: resolve.GraphQLSubscriptionTrigger{
 					Input: []byte(`{"url":"wss://swapi.com/graphql","body":{"query":"subscription{remainingJedis}"}}`),
 					Source: &SubscriptionSource{
-						NewGraphQLSubscriptionClient(http.DefaultClient, http.DefaultClient, ctx),
+						client: NewGraphQLSubscriptionClient(http.DefaultClient, http.DefaultClient, ctx),
 					},
 					PostProcessing: DefaultPostProcessingConfiguration,
 				},
@@ -5007,12 +4994,12 @@ func TestGraphQLDataSource(t *testing.T) {
 								TypeName:   "Query",
 								FieldNames: []string{"me", "user"},
 							},
-						},
-						ChildNodes: []plan.TypeField{
 							{
 								TypeName:   "User",
 								FieldNames: []string{"id", "name", "username", "birthDate", "account", "metadata", "ssn"},
 							},
+						},
+						ChildNodes: []plan.TypeField{
 							{
 								TypeName:   "UserMetadata",
 								FieldNames: []string{"name", "address", "description"},
@@ -5393,12 +5380,12 @@ func TestGraphQLDataSource(t *testing.T) {
 								TypeName:   "Query",
 								FieldNames: []string{"me", "user"},
 							},
-						},
-						ChildNodes: []plan.TypeField{
 							{
 								TypeName:   "User",
 								FieldNames: []string{"id", "name", "username", "birthDate", "account", "metadata", "ssn"},
 							},
+						},
+						ChildNodes: []plan.TypeField{
 							{
 								TypeName:   "UserMetadata",
 								FieldNames: []string{"name", "address", "description"},
@@ -8252,7 +8239,6 @@ func (f *FailingSubscriptionClient) SubscribeAsync(ctx *resolve.Context, id uint
 }
 
 func (f *FailingSubscriptionClient) Unsubscribe(id uint64) {
-
 }
 
 func (f *FailingSubscriptionClient) Subscribe(ctx *resolve.Context, options GraphQLSubscriptionOptions, updater resolve.SubscriptionUpdater) error {
@@ -8263,6 +8249,93 @@ func (f *FailingSubscriptionClient) UniqueRequestID(ctx *resolve.Context, option
 	return errSubscriptionClientFail
 }
 
+type testSubscriptionUpdaterChan struct {
+	updates  chan string
+	complete chan struct{}
+	closed   chan resolve.SubscriptionCloseKind
+}
+
+func newTestSubscriptionUpdaterChan() *testSubscriptionUpdaterChan {
+	return &testSubscriptionUpdaterChan{
+		updates:  make(chan string),
+		complete: make(chan struct{}),
+		closed:   make(chan resolve.SubscriptionCloseKind),
+	}
+}
+
+func (t *testSubscriptionUpdaterChan) Heartbeat() {
+	t.updates <- "{}"
+}
+
+func (t *testSubscriptionUpdaterChan) Update(data []byte) {
+	t.updates <- string(data)
+}
+
+// empty method to satisfy the interface, not used in this tests
+func (t *testSubscriptionUpdaterChan) UpdateSubscription(id resolve.SubscriptionIdentifier, data []byte) {
+}
+
+// empty method to satisfy the interface, not used in this tests
+func (t *testSubscriptionUpdaterChan) CloseSubscription(kind resolve.SubscriptionCloseKind, id resolve.SubscriptionIdentifier) {
+}
+
+// empty method to satisfy the interface, not used in this tests
+func (t *testSubscriptionUpdaterChan) Subscriptions() map[context.Context]resolve.SubscriptionIdentifier {
+	return make(map[context.Context]resolve.SubscriptionIdentifier)
+}
+
+func (t *testSubscriptionUpdaterChan) Complete() {
+	close(t.complete)
+}
+
+func (t *testSubscriptionUpdaterChan) Close(kind resolve.SubscriptionCloseKind) {
+	t.closed <- kind
+}
+
+func (t *testSubscriptionUpdaterChan) AwaitUpdateWithT(tt *testing.T, timeout time.Duration, f func(t *testing.T, update string), msgAndArgs ...any) {
+	tt.Helper()
+
+	select {
+	case args := <-t.updates:
+		f(tt, args)
+	case <-time.After(timeout):
+		require.Fail(tt, "unable to receive update before timeout", msgAndArgs...)
+	}
+}
+
+func (t *testSubscriptionUpdaterChan) AwaitClose(tt *testing.T, timeout time.Duration, msgAndArgs ...any) {
+	tt.Helper()
+
+	select {
+	case <-t.closed:
+	case <-time.After(timeout):
+		require.Fail(tt, "updater not closed before timeout", msgAndArgs...)
+	}
+}
+
+func (t *testSubscriptionUpdaterChan) AwaitCloseKind(tt *testing.T, timeout time.Duration, expectedCloseKind resolve.SubscriptionCloseKind, msgAndArgs ...any) {
+	tt.Helper()
+
+	select {
+	case closeKind := <-t.closed:
+		require.Equal(tt, expectedCloseKind, closeKind, msgAndArgs...)
+	case <-time.After(timeout):
+		require.Fail(tt, "updater not closed before timeout", msgAndArgs...)
+	}
+}
+
+func (t *testSubscriptionUpdaterChan) AwaitComplete(tt *testing.T, timeout time.Duration, msgAndArgs ...any) {
+	tt.Helper()
+
+	select {
+	case <-t.complete:
+	case <-time.After(timeout):
+		require.Fail(tt, "updater not completed before timeout", msgAndArgs...)
+	}
+}
+
+// !! If you see this in a test you're working on, please replace it with the new testSubscriptionUpdaterChan
+// It's faster, more ergonomic and more reliable. See SSE handler tests for usage examples.
 type testSubscriptionUpdater struct {
 	updates []string
 	done    bool
@@ -8271,6 +8344,8 @@ type testSubscriptionUpdater struct {
 }
 
 func (t *testSubscriptionUpdater) AwaitUpdates(tt *testing.T, timeout time.Duration, count int) {
+	tt.Helper()
+
 	ticker := time.NewTicker(timeout)
 	defer ticker.Stop()
 	for {
@@ -8290,6 +8365,8 @@ func (t *testSubscriptionUpdater) AwaitUpdates(tt *testing.T, timeout time.Durat
 }
 
 func (t *testSubscriptionUpdater) AwaitDone(tt *testing.T, timeout time.Duration) {
+	tt.Helper()
+
 	ticker := time.NewTicker(timeout)
 	defer ticker.Stop()
 	for {
@@ -8332,6 +8409,19 @@ func (t *testSubscriptionUpdater) Close(kind resolve.SubscriptionCloseKind) {
 	t.closed = true
 }
 
+// empty method to satisfy the interface, not used in this tests
+func (t *testSubscriptionUpdater) CloseSubscription(kind resolve.SubscriptionCloseKind, id resolve.SubscriptionIdentifier) {
+}
+
+// empty method to satisfy the interface, not used in this tests
+func (t *testSubscriptionUpdater) Subscriptions() map[context.Context]resolve.SubscriptionIdentifier {
+	return make(map[context.Context]resolve.SubscriptionIdentifier)
+}
+
+// empty method to satisfy the interface, not used in this tests
+func (t *testSubscriptionUpdater) UpdateSubscription(id resolve.SubscriptionIdentifier, data []byte) {
+}
+
 func TestSubscriptionSource_Start(t *testing.T) {
 	chatServer := httptest.NewServer(subscriptiontesting.ChatGraphQLEndpointHandler())
 	defer chatServer.Close()
@@ -8350,6 +8440,7 @@ func TestSubscriptionSource_Start(t *testing.T) {
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
 	}
 
 	chatServerSubscriptionOptions := func(t *testing.T, body string) []byte {
@@ -8477,6 +8568,7 @@ func TestSubscription_GTWS_SubProtocol(t *testing.T) {
 		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
 	}
 
 	chatServerSubscriptionOptions := func(t *testing.T, body string) []byte {
@@ -8866,6 +8958,7 @@ func TestLoadFiles(t *testing.T) {
 }
 
 func TestSanitizeKey(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -8900,6 +8993,60 @@ func TestSanitizeKey(t *testing.T) {
 			assert.Equal(t, test.expected, sanitizeKey(test.input))
 		})
 	}
+}
+
+func TestSubscriptionSource_SubscriptionOnStart(t *testing.T) {
+
+	t.Run("SubscriptionOnStart calls subscriptionOnStartFns", func(t *testing.T) {
+		ctx := resolve.StartupHookContext{
+			Context: context.Background(),
+			Updater: func(data []byte) {},
+		}
+
+		type fnData struct {
+			ctx   resolve.StartupHookContext
+			input []byte
+		}
+
+		startFnCalled := make(chan fnData, 1)
+		subscriptionSource := SubscriptionSource{
+			subscriptionOnStartFns: []SubscriptionOnStartFn{
+				func(ctx resolve.StartupHookContext, input []byte) error {
+					startFnCalled <- fnData{ctx, input}
+					return nil
+				},
+			},
+		}
+
+		err := subscriptionSource.SubscriptionOnStart(ctx, []byte(`{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomName: \"#test\") { text createdBy } }"}`))
+		require.NoError(t, err)
+		var called fnData
+		select {
+		case called = <-startFnCalled:
+		case <-time.After(1 * time.Second):
+			t.Fatal("SubscriptionOnStartFn was not called")
+		}
+		assert.Equal(t, []byte(`{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomName: \"#test\") { text createdBy } }"}`), called.input)
+	})
+
+	t.Run("SubscriptionOnStart calls subscriptionOnStartFns and returns error if one of the functions returns an error", func(t *testing.T) {
+		ctx := resolve.StartupHookContext{
+			Context: context.Background(),
+			Updater: func(data []byte) {},
+		}
+
+		subscriptionSource := SubscriptionSource{
+			subscriptionOnStartFns: []SubscriptionOnStartFn{
+				func(ctx resolve.StartupHookContext, input []byte) error {
+					return errors.New("test error")
+				},
+			},
+		}
+
+		err := subscriptionSource.SubscriptionOnStart(ctx, []byte(`{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomName: \"#test\") { text createdBy } }"}`))
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "test error")
+	})
 }
 
 const interfaceSelectionSchema = `

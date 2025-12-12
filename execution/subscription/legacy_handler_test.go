@@ -454,6 +454,7 @@ func TestHandler_Handle(t *testing.T) {
 					Payload: nil,
 				}
 
+				time.Sleep(10 * time.Millisecond)
 				messagesFromServer := client.readFromServer()
 				assert.Contains(t, messagesFromServer, expectedMessage)
 
@@ -690,5 +691,6 @@ func sendChatMutation(t *testing.T, url string) {
 	httpClient := http.Client{}
 	resp, err := httpClient.Do(req)
 	require.NoError(t, err)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }

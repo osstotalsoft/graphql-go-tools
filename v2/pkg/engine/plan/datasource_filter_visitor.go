@@ -3,8 +3,6 @@ package plan
 import (
 	"slices"
 
-	"github.com/kingledion/go-tools/tree"
-
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/operationreport"
 )
@@ -24,20 +22,24 @@ type DataSourceFilter struct {
 	secondaryRun           bool
 
 	fieldDependsOn map[int][]int
+	newFieldRefs   map[int]struct{}
 	dataSources    []DataSource
 
 	jumpsForPathForTypename map[KeyIndex]*DataSourceJumpsGraph
 	dsHashesHavingKeys      map[DSHash]struct{}
-	seenKeys                map[SeenKeyPath]struct{}
 
 	maxDataSourceCollectorsConcurrency uint
+	nodesCollector                     *nodesCollector
 }
 
-func NewDataSourceFilter(operation, definition *ast.Document, report *operationreport.Report) *DataSourceFilter {
+func NewDataSourceFilter(operation, definition *ast.Document, report *operationreport.Report, dataSources []DataSource, newFieldRefs map[int]struct{}) *DataSourceFilter {
 	return &DataSourceFilter{
-		operation:  operation,
-		definition: definition,
-		report:     report,
+		operation:    operation,
+		definition:   definition,
+		report:       report,
+		dataSources:  dataSources,
+		nodes:        NewNodeSuggestions(),
+		newFieldRefs: newFieldRefs,
 	}
 }
 
@@ -51,22 +53,21 @@ func (f *DataSourceFilter) WithMaxDataSourceCollectorsConcurrency(maxConcurrency
 	return f
 }
 
-func (f *DataSourceFilter) FilterDataSources(dataSources []DataSource, existingNodes *NodeSuggestions, landedTo map[int]DSHash, fieldDependsOn map[int][]int) (used []DataSource, suggestions *NodeSuggestions) {
+func (f *DataSourceFilter) FilterDataSources(landedTo map[int]DSHash, fieldDependsOn map[int][]int) (used []DataSource, suggestions *NodeSuggestions) {
 	var dsInUse map[DSHash]struct{}
 
 	f.fieldDependsOn = fieldDependsOn
-	f.dataSources = dataSources
 
-	suggestions, dsInUse = f.findBestDataSourceSet(existingNodes, landedTo)
+	suggestions, dsInUse = f.findBestDataSourceSet(landedTo)
 	if f.report.HasErrors() {
 		return
 	}
 
 	used = make([]DataSource, 0, len(dsInUse))
-	for i := range dataSources {
-		_, inUse := dsInUse[dataSources[i].Hash()]
+	for i := range f.dataSources {
+		_, inUse := dsInUse[f.dataSources[i].Hash()]
 		if inUse {
-			used = append(used, dataSources[i])
+			used = append(used, f.dataSources[i])
 		}
 	}
 
@@ -74,8 +75,8 @@ func (f *DataSourceFilter) FilterDataSources(dataSources []DataSource, existingN
 	return used, suggestions
 }
 
-func (f *DataSourceFilter) findBestDataSourceSet(existingNodes *NodeSuggestions, landedTo map[int]DSHash) (*NodeSuggestions, map[DSHash]struct{}) {
-	f.collectNodes(f.dataSources, existingNodes)
+func (f *DataSourceFilter) findBestDataSourceSet(landedTo map[int]DSHash) (*NodeSuggestions, map[DSHash]struct{}) {
+	f.collectNodes()
 	if f.report.HasErrors() {
 		return nil, nil
 	}
@@ -107,7 +108,9 @@ func (f *DataSourceFilter) applyLandedTo(landedTo map[int]DSHash) {
 
 		node, ok := f.nodes.responseTree.Find(treeNodeID)
 		if !ok {
-			panic("node not found")
+			// no such node in the tree
+			// we may removed it as orphaned
+			continue
 		}
 
 		nodeData := node.GetData()
@@ -139,27 +142,24 @@ func (f *DataSourceFilter) applyLandedTo(landedTo map[int]DSHash) {
 
 }
 
-func (f *DataSourceFilter) collectNodes(dataSources []DataSource, existingNodes *NodeSuggestions) {
-	if existingNodes == nil {
-		existingNodes = NewNodeSuggestions()
+func (f *DataSourceFilter) collectNodes() {
+	if f.nodesCollector == nil {
+		f.nodesCollector = &nodesCollector{
+			operation:      f.operation,
+			definition:     f.definition,
+			dataSources:    f.dataSources,
+			nodes:          f.nodes,
+			report:         f.report,
+			maxConcurrency: f.maxDataSourceCollectorsConcurrency,
+			seenKeys:       make(map[SeenKeyPath]struct{}),
+			fieldInfo:      make(map[int]fieldInfo),
+			newFieldRefs:   f.newFieldRefs,
+		}
+
+		f.nodesCollector.initVisitors()
 	}
 
-	if f.seenKeys == nil {
-		f.seenKeys = make(map[SeenKeyPath]struct{})
-	}
-
-	nodesCollector := &nodesCollector{
-		operation:      f.operation,
-		definition:     f.definition,
-		dataSources:    dataSources,
-		nodes:          existingNodes,
-		report:         f.report,
-		maxConcurrency: f.maxDataSourceCollectorsConcurrency,
-		seenKeys:       f.seenKeys,
-	}
-
-	var keysInfo []DSKeyInfo
-	f.nodes, keysInfo = nodesCollector.CollectNodes()
+	keysInfo := f.nodesCollector.CollectNodes()
 
 	if f.dsHashesHavingKeys == nil {
 		f.dsHashesHavingKeys = make(map[DSHash]struct{})
@@ -184,8 +184,8 @@ func (f *DataSourceFilter) collectNodes(dataSources []DataSource, existingNodes 
 	}
 
 	usedDsHashes := make([]DSHash, 0, len(f.dsHashesHavingKeys))
-	// iterate over datasources to have deterministic order
-	for _, ds := range dataSources {
+	// iterate over datasources to have a deterministic order
+	for _, ds := range f.dataSources {
 		if _, ok := f.dsHashesHavingKeys[ds.Hash()]; ok {
 			usedDsHashes = append(usedDsHashes, ds.Hash())
 		}
@@ -197,10 +197,8 @@ func (f *DataSourceFilter) collectNodes(dataSources []DataSource, existingNodes 
 }
 
 const (
-	ReasonStage1Unique                = "stage1: unique"
-	ReasonStage1SameSourceParent      = "stage1: same source parent of unique node"
-	ReasonStage1SameSourceLeafChild   = "stage1: same source leaf child of unique node"
-	ReasonStage1SameSourceLeafSibling = "stage1: same source leaf sibling of unique node"
+	ReasonStage1Unique           = "stage1: unique"
+	ReasonStage1SameSourceParent = "stage1: same source parent of unique node"
 
 	ReasonStage2SameSourceNodeOfSelectedParent  = "stage2: node on the same source as selected parent"
 	ReasonStage2SameSourceNodeOfSelectedChild   = "stage2: node on the same source as selected child"
@@ -218,73 +216,73 @@ const (
 )
 
 // selectUniqueNodes - selects nodes (e.g. fields) which are unique to a single datasource
-// In addition we select:
-//   - parent of such node if the node is a leaf and not nested under the fragment
-//   - siblings nodes
 func (f *DataSourceFilter) selectUniqueNodes() {
 
 	for i := range f.nodes.items {
+		if f.nodes.items[i].IsOrphan {
+			continue
+		}
+
 		if f.nodes.items[i].Selected {
 			continue
 		}
 
-		isNodeUnique := f.nodes.isNodeUnique(i)
-		if !isNodeUnique {
+		if !f.nodes.isNodeUnique(i) {
 			continue
 		}
 
 		// unique nodes always have priority
 		f.nodes.items[i].selectWithReason(ReasonStage1Unique, f.enableSelectionReasons)
 
-		if !f.nodes.items[i].onFragment { // on a first stage do not select parent of nodes on fragments
-			// if node parents of the unique node is on the same source, prioritize it too
-			f.selectUniqNodeParentsUpToRootNode(i)
-		}
-
-		// if node has leaf children on the same source, prioritize them too
-		children := f.nodes.childNodesOnSameSource(i)
-		for _, child := range children {
-			if f.nodes.isLeaf(child) && f.nodes.isNodeUnique(child) {
-				f.nodes.items[child].selectWithReason(ReasonStage1SameSourceLeafChild, f.enableSelectionReasons)
-			}
-		}
-
-		// prioritize leaf siblings of the node on the same source
-		siblings := f.nodes.siblingNodesOnSameSource(i)
-		for _, sibling := range siblings {
-			if f.nodes.isLeaf(sibling) && f.nodes.isNodeUnique(sibling) {
-				f.nodes.items[sibling].selectWithReason(ReasonStage1SameSourceLeafSibling, f.enableSelectionReasons)
-			}
-		}
+		f.selectUniqNodeParentsUpToRootNode(i)
 	}
 }
 
 func (f *DataSourceFilter) selectUniqNodeParentsUpToRootNode(i int) {
 	// When we have a chain of datasource child nodes, we should select every parent until we reach the root node
-	// as root node is a starting point from where we could get all these child nodes
+	// as a root node is a starting point from where we could get all these child nodes
 
 	if f.nodes.items[i].IsRootNode {
-		// no need to select parent of a root node here
+		// no need to select the parent of a root node here
 		// as it could be resolved by itself
 		return
 	}
 
+	rootNodeFound := false
+	nodesIdsToSelect := make([]int, 0, 2)
 	current := i
 	for {
 		parentIdx, ok := f.nodes.parentNodeOnSameSource(current)
 		if !ok {
 			break
 		}
+		nodesIdsToSelect = append(nodesIdsToSelect, parentIdx)
 
-		if !f.selectWithExternalCheck(parentIdx, ReasonStage1SameSourceParent) {
-			// when we see an external node in the chain, we stop selectiong process
+		if f.nodes.items[parentIdx].IsExternal && !f.nodes.items[i].IsProvided {
+			// such a parent can't be selected,
+			// so we skip this parent but continue looking for a potential root node higher
+			current = parentIdx
+			continue
+		}
+
+		// TODO: there could be a potential situation when we have selected root node with enabled entity resolver,
+		// but we can't jump to it because no parent could provide a key for it
+		// Need to consider how to move this logic into the selection process of duplicated nodes maybe?
+
+		if f.nodes.items[parentIdx].IsRootNode && !f.nodes.items[parentIdx].DisabledEntityResolver {
+			rootNodeFound = true
 			break
 		}
 
 		current = parentIdx
-		if f.nodes.items[current].IsRootNode {
-			break
-		}
+	}
+
+	if !rootNodeFound {
+		return
+	}
+
+	for _, parentIdx := range nodesIdsToSelect {
+		f.nodes.items[parentIdx].selectWithReason(ReasonStage1SameSourceParent, f.enableSelectionReasons)
 	}
 }
 
@@ -389,14 +387,11 @@ func (f *DataSourceFilter) assignKeys(itemIdx int, parentNodeIndexes []int) {
 // On a second run in additional to all the checks from the first run
 // we select nodes which was not chosen by previous stages, so we just pick first available datasource
 func (f *DataSourceFilter) selectDuplicateNodes(secondPass bool) {
-
-	treeNodes := f.nodes.responseTree.Traverse(tree.TraverseBreadthFirst)
-
-	for treeNode := range treeNodes {
+	for id, treeNode := range TraverseBFS(f.nodes.responseTree) {
 		// f.nodes.printNodes("nodes")
 		// fmt.Println()
 
-		if treeNode.GetID() == treeRootID {
+		if id == treeRootID {
 			continue
 		}
 
@@ -529,36 +524,9 @@ func (f *DataSourceFilter) selectDuplicateNodes(secondPass bool) {
 			continue
 		}
 
-		// 2. Lookup for the first parent root node with enabled entity resolver
-		// when we haven't found a possible duplicate
-		// we need to find parent node which is a root node and has enabled entity resolver, e.g. the point in the query from where we could jump
-		// it is a parent entity jump case
+		// stages 2,3,4 - are stages when choices are equal, and we should select first available node
 
-		if f.checkNodes(itemIDs,
-			func(i int) bool {
-				if f.nodes.items[i].IsExternal && !f.nodes.items[i].IsProvided {
-					return false
-				}
-
-				parents := f.findPossibleParents(i)
-				if len(parents) > 0 {
-					if f.selectWithExternalCheck(i, ReasonStage3SelectNodeUnderFirstParentRootNode) {
-						for _, parent := range parents {
-							f.nodes.items[parent].selectWithReason(ReasonStage3SelectParentRootNodeWithEnabledEntityResolver, f.enableSelectionReasons)
-						}
-
-						return true
-					}
-				}
-				return false
-			},
-			nil) {
-			continue
-		}
-
-		// stages 3,4,5 - are stages when choices are equal, and we should select first available node
-
-		// 3. we choose first available leaf node
+		// 2. we choose the first available leaf node
 		if f.checkNodes(itemIDs,
 			func(i int) bool {
 				return f.selectWithExternalCheck(i, ReasonStage3SelectAvailableLeafNode)
@@ -582,7 +550,7 @@ func (f *DataSourceFilter) selectDuplicateNodes(secondPass bool) {
 			continue
 		}
 
-		// 4. if node is not a leaf we select a node which could provide more selections on the same source
+		// 3. if node is not a leaf we select a node which could provide more selections on the same source
 		currentChildNodeCount := -1
 		currentItemIDx := -1
 
@@ -605,7 +573,7 @@ func (f *DataSourceFilter) selectDuplicateNodes(secondPass bool) {
 			continue
 		}
 
-		// 5. We check here not leaf nodes which could provide keys to the child nodes
+		// 4. We check here not leaf nodes which could provide keys to the child nodes
 		// this rule one of the rules responsible for the shareable nodes
 		if f.checkNodes(itemIDs,
 			func(i int) bool {
@@ -630,6 +598,37 @@ func (f *DataSourceFilter) selectDuplicateNodes(secondPass bool) {
 			}) {
 			continue
 		}
+
+		// 5. Lookup for the first parent root node with the enabled entity resolver.
+		// When we haven't found a possible duplicate -
+		// we need to find the parent node which is a root node and has enabled entity resolver,
+		// e.g., the point in the query from where we could jump.
+		// It is a parent entity jump case, and it is less preferable,
+		// than direct entity jump, so it should go last.
+
+		// TODO: replace with all nodes check - select smallest parent entity chain
+		if f.checkNodes(itemIDs,
+			func(i int) bool {
+				if f.nodes.items[i].IsExternal && !f.nodes.items[i].IsProvided {
+					return false
+				}
+
+				parents := f.findPossibleParents(i)
+				if len(parents) > 0 {
+					if f.selectWithExternalCheck(i, ReasonStage3SelectNodeUnderFirstParentRootNode) {
+						for _, parent := range parents {
+							f.nodes.items[parent].selectWithReason(ReasonStage3SelectParentRootNodeWithEnabledEntityResolver, f.enableSelectionReasons)
+						}
+
+						return true
+					}
+				}
+				return false
+			},
+			nil) {
+			continue
+		}
+
 	}
 }
 

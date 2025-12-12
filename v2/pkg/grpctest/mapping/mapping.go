@@ -9,8 +9,8 @@ import (
 // DefaultGRPCMapping returns a hardcoded default mapping between GraphQL and Protobuf
 func DefaultGRPCMapping() *grpcdatasource.GRPCMapping {
 	return &grpcdatasource.GRPCMapping{
-		Service: "ProductService",
-		QueryRPCs: map[string]grpcdatasource.RPCConfig{
+		Service: "Products",
+		QueryRPCs: grpcdatasource.RPCConfigMap[grpcdatasource.RPCConfig]{
 			"users": {
 				RPC:      "QueryUsers",
 				Request:  "QueryUsersRequest",
@@ -51,16 +51,6 @@ func DefaultGRPCMapping() *grpcdatasource.GRPCMapping {
 				Request:  "QueryCalculateTotalsRequest",
 				Response: "QueryCalculateTotalsResponse",
 			},
-			"randomPet": {
-				RPC:      "QueryRandomPet",
-				Request:  "QueryRandomPetRequest",
-				Response: "QueryRandomPetResponse",
-			},
-			"allPets": {
-				RPC:      "QueryAllPets",
-				Request:  "QueryAllPetsRequest",
-				Response: "QueryAllPetsResponse",
-			},
 			"categories": {
 				RPC:      "QueryCategories",
 				Request:  "QueryCategoriesRequest",
@@ -71,35 +61,364 @@ func DefaultGRPCMapping() *grpcdatasource.GRPCMapping {
 				Request:  "QueryCategoriesByKindRequest",
 				Response: "QueryCategoriesByKindResponse",
 			},
+			"categoriesByKinds": {
+				RPC:      "QueryCategoriesByKinds",
+				Request:  "QueryCategoriesByKindsRequest",
+				Response: "QueryCategoriesByKindsResponse",
+			},
 			"filterCategories": {
 				RPC:      "QueryFilterCategories",
 				Request:  "QueryFilterCategoriesRequest",
 				Response: "QueryFilterCategoriesResponse",
 			},
-		},
-		MutationRPCs: grpcdatasource.RPCConfigMap{
-			"createUser": {
-				RPC:      "CreateUser",
-				Request:  "CreateUserRequest",
-				Response: "CreateUserResponse",
+			"randomPet": {
+				RPC:      "QueryRandomPet",
+				Request:  "QueryRandomPetRequest",
+				Response: "QueryRandomPetResponse",
+			},
+			"allPets": {
+				RPC:      "QueryAllPets",
+				Request:  "QueryAllPetsRequest",
+				Response: "QueryAllPetsResponse",
+			},
+			"search": {
+				RPC:      "QuerySearch",
+				Request:  "QuerySearchRequest",
+				Response: "QuerySearchResponse",
+			},
+			"randomSearchResult": {
+				RPC:      "QueryRandomSearchResult",
+				Request:  "QueryRandomSearchResultRequest",
+				Response: "QueryRandomSearchResultResponse",
+			},
+			"nullableFieldsType": {
+				RPC:      "QueryNullableFieldsType",
+				Request:  "QueryNullableFieldsTypeRequest",
+				Response: "QueryNullableFieldsTypeResponse",
+			},
+			"nullableFieldsTypeById": {
+				RPC:      "QueryNullableFieldsTypeById",
+				Request:  "QueryNullableFieldsTypeByIdRequest",
+				Response: "QueryNullableFieldsTypeByIdResponse",
+			},
+			"nullableFieldsTypeWithFilter": {
+				RPC:      "QueryNullableFieldsTypeWithFilter",
+				Request:  "QueryNullableFieldsTypeWithFilterRequest",
+				Response: "QueryNullableFieldsTypeWithFilterResponse",
+			},
+			"allNullableFieldsTypes": {
+				RPC:      "QueryAllNullableFieldsTypes",
+				Request:  "QueryAllNullableFieldsTypesRequest",
+				Response: "QueryAllNullableFieldsTypesResponse",
+			},
+			"blogPost": {
+				RPC:      "QueryBlogPost",
+				Request:  "QueryBlogPostRequest",
+				Response: "QueryBlogPostResponse",
+			},
+			"blogPostById": {
+				RPC:      "QueryBlogPostById",
+				Request:  "QueryBlogPostByIdRequest",
+				Response: "QueryBlogPostByIdResponse",
+			},
+			"blogPostsWithFilter": {
+				RPC:      "QueryBlogPostsWithFilter",
+				Request:  "QueryBlogPostsWithFilterRequest",
+				Response: "QueryBlogPostsWithFilterResponse",
+			},
+			"allBlogPosts": {
+				RPC:      "QueryAllBlogPosts",
+				Request:  "QueryAllBlogPostsRequest",
+				Response: "QueryAllBlogPostsResponse",
+			},
+			"author": {
+				RPC:      "QueryAuthor",
+				Request:  "QueryAuthorRequest",
+				Response: "QueryAuthorResponse",
+			},
+			"authorById": {
+				RPC:      "QueryAuthorById",
+				Request:  "QueryAuthorByIdRequest",
+				Response: "QueryAuthorByIdResponse",
+			},
+			"authorsWithFilter": {
+				RPC:      "QueryAuthorsWithFilter",
+				Request:  "QueryAuthorsWithFilterRequest",
+				Response: "QueryAuthorsWithFilterResponse",
+			},
+			"allAuthors": {
+				RPC:      "QueryAllAuthors",
+				Request:  "QueryAllAuthorsRequest",
+				Response: "QueryAllAuthorsResponse",
+			},
+			"bulkSearchAuthors": {
+				RPC:      "QueryBulkSearchAuthors",
+				Request:  "QueryBulkSearchAuthorsRequest",
+				Response: "QueryBulkSearchAuthorsResponse",
+			},
+			"bulkSearchBlogPosts": {
+				RPC:      "QueryBulkSearchBlogPosts",
+				Request:  "QueryBulkSearchBlogPostsRequest",
+				Response: "QueryBulkSearchBlogPostsResponse",
+			},
+			"testContainer": {
+				RPC:      "QueryTestContainer",
+				Request:  "QueryTestContainerRequest",
+				Response: "QueryTestContainerResponse",
+			},
+			"testContainers": {
+				RPC:      "QueryTestContainers",
+				Request:  "QueryTestContainersRequest",
+				Response: "QueryTestContainersResponse",
 			},
 		},
-		SubscriptionRPCs: grpcdatasource.RPCConfigMap{},
-		EntityRPCs: map[string]grpcdatasource.EntityRPCConfig{
+		MutationRPCs: grpcdatasource.RPCConfigMap[grpcdatasource.RPCConfig]{
+			"createUser": {
+				RPC:      "MutationCreateUser",
+				Request:  "MutationCreateUserRequest",
+				Response: "MutationCreateUserResponse",
+			},
+			"performAction": {
+				RPC:      "MutationPerformAction",
+				Request:  "MutationPerformActionRequest",
+				Response: "MutationPerformActionResponse",
+			},
+			"createNullableFieldsType": {
+				RPC:      "MutationCreateNullableFieldsType",
+				Request:  "MutationCreateNullableFieldsTypeRequest",
+				Response: "MutationCreateNullableFieldsTypeResponse",
+			},
+			"updateNullableFieldsType": {
+				RPC:      "MutationUpdateNullableFieldsType",
+				Request:  "MutationUpdateNullableFieldsTypeRequest",
+				Response: "MutationUpdateNullableFieldsTypeResponse",
+			},
+			"createBlogPost": {
+				RPC:      "MutationCreateBlogPost",
+				Request:  "MutationCreateBlogPostRequest",
+				Response: "MutationCreateBlogPostResponse",
+			},
+			"updateBlogPost": {
+				RPC:      "MutationUpdateBlogPost",
+				Request:  "MutationUpdateBlogPostRequest",
+				Response: "MutationUpdateBlogPostResponse",
+			},
+			"createAuthor": {
+				RPC:      "MutationCreateAuthor",
+				Request:  "MutationCreateAuthorRequest",
+				Response: "MutationCreateAuthorResponse",
+			},
+			"updateAuthor": {
+				RPC:      "MutationUpdateAuthor",
+				Request:  "MutationUpdateAuthorRequest",
+				Response: "MutationUpdateAuthorResponse",
+			},
+			"bulkCreateAuthors": {
+				RPC:      "MutationBulkCreateAuthors",
+				Request:  "MutationBulkCreateAuthorsRequest",
+				Response: "MutationBulkCreateAuthorsResponse",
+			},
+			"bulkUpdateAuthors": {
+				RPC:      "MutationBulkUpdateAuthors",
+				Request:  "MutationBulkUpdateAuthorsRequest",
+				Response: "MutationBulkUpdateAuthorsResponse",
+			},
+			"bulkCreateBlogPosts": {
+				RPC:      "MutationBulkCreateBlogPosts",
+				Request:  "MutationBulkCreateBlogPostsRequest",
+				Response: "MutationBulkCreateBlogPostsResponse",
+			},
+			"bulkUpdateBlogPosts": {
+				RPC:      "MutationBulkUpdateBlogPosts",
+				Request:  "MutationBulkUpdateBlogPostsRequest",
+				Response: "MutationBulkUpdateBlogPostsResponse",
+			},
+		},
+		SubscriptionRPCs: grpcdatasource.RPCConfigMap[grpcdatasource.RPCConfig]{},
+		ResolveRPCs: grpcdatasource.RPCConfigMap[grpcdatasource.ResolveRPCMapping]{
+			"Category": {
+				"productCount": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "product_count",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"filters": "filters",
+						},
+					},
+					RPC:      "ResolveCategoryProductCount",
+					Request:  "ResolveCategoryProductCountRequest",
+					Response: "ResolveCategoryProductCountResponse",
+				},
+				"popularityScore": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "popularity_score",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"threshold": "threshold",
+						},
+					},
+					RPC:      "ResolveCategoryPopularityScore",
+					Request:  "ResolveCategoryPopularityScoreRequest",
+					Response: "ResolveCategoryPopularityScoreResponse",
+				},
+				"categoryMetrics": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "category_metrics",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"metricType": "metric_type",
+						},
+					},
+					RPC:      "ResolveCategoryCategoryMetrics",
+					Request:  "ResolveCategoryCategoryMetricsRequest",
+					Response: "ResolveCategoryCategoryMetricsResponse",
+				},
+				"mascot": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "mascot",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"includeVolume": "include_volume",
+						},
+					},
+					RPC:      "ResolveCategoryMascot",
+					Request:  "ResolveCategoryMascotRequest",
+					Response: "ResolveCategoryMascotResponse",
+				},
+				"categoryStatus": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "category_status",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"checkHealth": "check_health",
+						},
+					},
+					RPC:      "ResolveCategoryCategoryStatus",
+					Request:  "ResolveCategoryCategoryStatusRequest",
+					Response: "ResolveCategoryCategoryStatusResponse",
+				},
+			},
+			"CategoryMetrics": {
+				"normalizedScore": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "normalized_score",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"baseline": "baseline",
+						},
+					},
+					RPC:      "ResolveCategoryMetricsNormalizedScore",
+					Request:  "ResolveCategoryMetricsNormalizedScoreRequest",
+					Response: "ResolveCategoryMetricsNormalizedScoreResponse",
+				},
+			},
 			"Product": {
-				Key: "id",
-				RPCConfig: grpcdatasource.RPCConfig{
-					RPC:      "LookupProductById",
-					Request:  "LookupProductByIdRequest",
-					Response: "LookupProductByIdResponse",
+				"shippingEstimate": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "shipping_estimate",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"input": "input",
+						},
+					},
+					RPC:      "ResolveProductShippingEstimate",
+					Request:  "ResolveProductShippingEstimateRequest",
+					Response: "ResolveProductShippingEstimateResponse",
+				},
+				"recommendedCategory": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "recommended_category",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"maxPrice": "max_price",
+						},
+					},
+					RPC:      "ResolveProductRecommendedCategory",
+					Request:  "ResolveProductRecommendedCategoryRequest",
+					Response: "ResolveProductRecommendedCategoryResponse",
+				},
+				"mascotRecommendation": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "mascot_recommendation",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"includeDetails": "include_details",
+						},
+					},
+					RPC:      "ResolveProductMascotRecommendation",
+					Request:  "ResolveProductMascotRecommendationRequest",
+					Response: "ResolveProductMascotRecommendationResponse",
+				},
+				"stockStatus": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "stock_status",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"checkAvailability": "check_availability",
+						},
+					},
+					RPC:      "ResolveProductStockStatus",
+					Request:  "ResolveProductStockStatusRequest",
+					Response: "ResolveProductStockStatusResponse",
+				},
+				"productDetails": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "product_details",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"includeExtended": "include_extended",
+						},
+					},
+					RPC:      "ResolveProductProductDetails",
+					Request:  "ResolveProductProductDetailsRequest",
+					Response: "ResolveProductProductDetailsResponse",
+				},
+			},
+			"Subcategory": {
+				"itemCount": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "item_count",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"filters": "filters",
+						},
+					},
+					RPC:      "ResolveSubcategoryItemCount",
+					Request:  "ResolveSubcategoryItemCountRequest",
+					Response: "ResolveSubcategoryItemCountResponse",
+				},
+			},
+			"TestContainer": {
+				"details": {
+					FieldMappingData: grpcdatasource.FieldMapData{
+						TargetName: "details",
+						ArgumentMappings: grpcdatasource.FieldArgumentMap{
+							"includeExtended": "include_extended",
+						},
+					},
+					RPC:      "ResolveTestContainerDetails",
+					Request:  "ResolveTestContainerDetailsRequest",
+					Response: "ResolveTestContainerDetailsResponse",
+				},
+			},
+		},
+		EntityRPCs: map[string][]grpcdatasource.EntityRPCConfig{
+			"Product": {
+				{
+					Key: "id",
+					RPCConfig: grpcdatasource.RPCConfig{
+						RPC:      "LookupProductById",
+						Request:  "LookupProductByIdRequest",
+						Response: "LookupProductByIdResponse",
+					},
 				},
 			},
 			"Storage": {
-				Key: "id",
-				RPCConfig: grpcdatasource.RPCConfig{
-					RPC:      "LookupStorageById",
-					Request:  "LookupStorageByIdRequest",
-					Response: "LookupStorageByIdResponse",
+				{
+					Key: "id",
+					RPCConfig: grpcdatasource.RPCConfig{
+						RPC:      "LookupStorageById",
+						Request:  "LookupStorageByIdRequest",
+						Response: "LookupStorageByIdResponse",
+					},
+				},
+			},
+			"Warehouse": {
+				{
+					Key: "id",
+					RPCConfig: grpcdatasource.RPCConfig{
+						RPC:      "LookupWarehouseById",
+						Request:  "LookupWarehouseByIdRequest",
+						Response: "LookupWarehouseByIdResponse",
+					},
 				},
 			},
 		},
@@ -110,12 +429,20 @@ func DefaultGRPCMapping() *grpcdatasource.GRPCMapping {
 				{Value: "FURNITURE", TargetValue: "CATEGORY_KIND_FURNITURE"},
 				{Value: "OTHER", TargetValue: "CATEGORY_KIND_OTHER"},
 			},
+			"ShippingDestination": {
+				{Value: "DOMESTIC", TargetValue: "SHIPPING_DESTINATION_DOMESTIC"},
+				{Value: "EXPRESS", TargetValue: "SHIPPING_DESTINATION_EXPRESS"},
+				{Value: "INTERNATIONAL", TargetValue: "SHIPPING_DESTINATION_INTERNATIONAL"},
+			},
 		},
 		Fields: map[string]grpcdatasource.FieldMap{
 			"Query": {
+				"users": {
+					TargetName: "users",
+				},
 				"user": {
 					TargetName: "user",
-					ArgumentMappings: map[string]string{
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
 						"id": "id",
 					},
 				},
@@ -125,64 +452,218 @@ func DefaultGRPCMapping() *grpcdatasource.GRPCMapping {
 				"recursiveType": {
 					TargetName: "recursive_type",
 				},
-				"randomPet": {
-					TargetName: "random_pet",
-				},
-				"allPets": {
-					TargetName: "all_pets",
-				},
-				"categories": {
-					TargetName: "categories",
-				},
-				"categoriesByKind": {
-					TargetName: "categories_by_kind",
-					ArgumentMappings: map[string]string{
-						"kind": "kind",
-					},
-				},
-				"filterCategories": {
-					TargetName: "filter_categories",
-					ArgumentMappings: map[string]string{
-						"filter": "filter",
-					},
-				},
 				"typeFilterWithArguments": {
 					TargetName: "type_filter_with_arguments",
-					ArgumentMappings: map[string]string{
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
 						"filterField1": "filter_field_1",
 						"filterField2": "filter_field_2",
 					},
 				},
 				"typeWithMultipleFilterFields": {
 					TargetName: "type_with_multiple_filter_fields",
-					ArgumentMappings: map[string]string{
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
 						"filter": "filter",
 					},
 				},
 				"complexFilterType": {
 					TargetName: "complex_filter_type",
-					ArgumentMappings: map[string]string{
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
 						"filter": "filter",
 					},
 				},
 				"calculateTotals": {
 					TargetName: "calculate_totals",
-					ArgumentMappings: map[string]string{
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
 						"orders": "orders",
 					},
+				},
+				"categories": {
+					TargetName: "categories",
+				},
+				"categoriesByKind": {
+					TargetName: "categories_by_kind",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"kind": "kind",
+					},
+				},
+				"categoriesByKinds": {
+					TargetName: "categories_by_kinds",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"kinds": "kinds",
+					},
+				},
+				"filterCategories": {
+					TargetName: "filter_categories",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"filter": "filter",
+					},
+				},
+				"randomPet": {
+					TargetName: "random_pet",
+				},
+				"allPets": {
+					TargetName: "all_pets",
+				},
+				"search": {
+					TargetName: "search",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"input": "input",
+					},
+				},
+				"randomSearchResult": {
+					TargetName: "random_search_result",
+				},
+				"nullableFieldsType": {
+					TargetName: "nullable_fields_type",
+				},
+				"nullableFieldsTypeById": {
+					TargetName: "nullable_fields_type_by_id",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"id": "id",
+					},
+				},
+				"nullableFieldsTypeWithFilter": {
+					TargetName: "nullable_fields_type_with_filter",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"filter": "filter",
+					},
+				},
+				"allNullableFieldsTypes": {
+					TargetName: "all_nullable_fields_types",
+				},
+				"blogPost": {
+					TargetName: "blog_post",
+				},
+				"blogPostById": {
+					TargetName: "blog_post_by_id",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"id": "id",
+					},
+				},
+				"blogPostsWithFilter": {
+					TargetName: "blog_posts_with_filter",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"filter": "filter",
+					},
+				},
+				"allBlogPosts": {
+					TargetName: "all_blog_posts",
+				},
+				"author": {
+					TargetName: "author",
+				},
+				"authorById": {
+					TargetName: "author_by_id",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"id": "id",
+					},
+				},
+				"authorsWithFilter": {
+					TargetName: "authors_with_filter",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"filter": "filter",
+					},
+				},
+				"allAuthors": {
+					TargetName: "all_authors",
+				},
+				"bulkSearchAuthors": {
+					TargetName: "bulk_search_authors",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"filters": "filters",
+					},
+				},
+				"bulkSearchBlogPosts": {
+					TargetName: "bulk_search_blog_posts",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"filters": "filters",
+					},
+				},
+				"testContainer": {
+					TargetName: "test_container",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"id": "id",
+					},
+				},
+				"testContainers": {
+					TargetName: "test_containers",
 				},
 			},
 			"Mutation": {
 				"createUser": {
 					TargetName: "create_user",
-					ArgumentMappings: map[string]string{
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
 						"input": "input",
 					},
 				},
-			},
-			"UserInput": {
-				"name": {
-					TargetName: "name",
+				"performAction": {
+					TargetName: "perform_action",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"input": "input",
+					},
+				},
+				"createNullableFieldsType": {
+					TargetName: "create_nullable_fields_type",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"input": "input",
+					},
+				},
+				"updateNullableFieldsType": {
+					TargetName: "update_nullable_fields_type",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"id":    "id",
+						"input": "input",
+					},
+				},
+				"createBlogPost": {
+					TargetName: "create_blog_post",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"input": "input",
+					},
+				},
+				"updateBlogPost": {
+					TargetName: "update_blog_post",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"id":    "id",
+						"input": "input",
+					},
+				},
+				"createAuthor": {
+					TargetName: "create_author",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"input": "input",
+					},
+				},
+				"updateAuthor": {
+					TargetName: "update_author",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"id":    "id",
+						"input": "input",
+					},
+				},
+				"bulkCreateAuthors": {
+					TargetName: "bulk_create_authors",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"authors": "authors",
+					},
+				},
+				"bulkUpdateAuthors": {
+					TargetName: "bulk_update_authors",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"authors": "authors",
+					},
+				},
+				"bulkCreateBlogPosts": {
+					TargetName: "bulk_create_blog_posts",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"blogPosts": "blog_posts",
+					},
+				},
+				"bulkUpdateBlogPosts": {
+					TargetName: "bulk_update_blog_posts",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"blogPosts": "blog_posts",
+					},
 				},
 			},
 			"Product": {
@@ -195,8 +676,63 @@ func DefaultGRPCMapping() *grpcdatasource.GRPCMapping {
 				"price": {
 					TargetName: "price",
 				},
+				"shippingEstimate": {
+					TargetName: "shipping_estimate",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"input": "input",
+					},
+				},
+				"recommendedCategory": {
+					TargetName: "recommended_category",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"maxPrice": "max_price",
+					},
+				},
+				"mascotRecommendation": {
+					TargetName: "mascot_recommendation",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"includeDetails": "include_details",
+					},
+				},
+				"stockStatus": {
+					TargetName: "stock_status",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"checkAvailability": "check_availability",
+					},
+				},
+				"productDetails": {
+					TargetName: "product_details",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"includeExtended": "include_extended",
+					},
+				},
+			},
+			"ProductDetails": {
+				"id": {
+					TargetName: "id",
+				},
+				"description": {
+					TargetName: "description",
+				},
+				"reviewSummary": {
+					TargetName: "review_summary",
+				},
+				"recommendedPet": {
+					TargetName: "recommended_pet",
+				},
 			},
 			"Storage": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"location": {
+					TargetName: "location",
+				},
+			},
+			"Warehouse": {
 				"id": {
 					TargetName: "id",
 				},
@@ -270,48 +806,20 @@ func DefaultGRPCMapping() *grpcdatasource.GRPCMapping {
 					TargetName: "filter_field_2",
 				},
 			},
+			"FilterTypeInput": {
+				"filterField1": {
+					TargetName: "filter_field_1",
+				},
+				"filterField2": {
+					TargetName: "filter_field_2",
+				},
+			},
 			"TypeWithComplexFilterInput": {
 				"id": {
 					TargetName: "id",
 				},
 				"name": {
 					TargetName: "name",
-				},
-			},
-			"Cat": {
-				"id": {
-					TargetName: "id",
-				},
-				"name": {
-					TargetName: "name",
-				},
-				"kind": {
-					TargetName: "kind",
-				},
-				"meowVolume": {
-					TargetName: "meow_volume",
-				},
-			},
-			"Dog": {
-				"id": {
-					TargetName: "id",
-				},
-				"name": {
-					TargetName: "name",
-				},
-				"kind": {
-					TargetName: "kind",
-				},
-				"barkVolume": {
-					TargetName: "bark_volume",
-				},
-			},
-			"Animal": {
-				"cat": {
-					TargetName: "cat",
-				},
-				"dog": {
-					TargetName: "dog",
 				},
 			},
 			"FilterType": {
@@ -341,23 +849,26 @@ func DefaultGRPCMapping() *grpcdatasource.GRPCMapping {
 					TargetName: "filter",
 				},
 			},
-			"Category": {
-				"id": {
-					TargetName: "id",
+			"OrderLineInput": {
+				"productId": {
+					TargetName: "product_id",
 				},
-				"name": {
-					TargetName: "name",
+				"quantity": {
+					TargetName: "quantity",
 				},
-				"kind": {
-					TargetName: "kind",
+				"modifiers": {
+					TargetName: "modifiers",
 				},
 			},
-			"CategoryFilter": {
-				"category": {
-					TargetName: "category",
+			"OrderInput": {
+				"orderId": {
+					TargetName: "order_id",
 				},
-				"pagination": {
-					TargetName: "pagination",
+				"customerName": {
+					TargetName: "customer_name",
+				},
+				"lines": {
+					TargetName: "lines",
 				},
 			},
 			"Order": {
@@ -385,32 +896,615 @@ func DefaultGRPCMapping() *grpcdatasource.GRPCMapping {
 					TargetName: "modifiers",
 				},
 			},
-			"OrderInput": {
-				"orderId": {
-					TargetName: "order_id",
+			"CategoryFilter": {
+				"category": {
+					TargetName: "category",
 				},
-				"customerName": {
-					TargetName: "customer_name",
-				},
-				"lines": {
-					TargetName: "lines",
+				"pagination": {
+					TargetName: "pagination",
 				},
 			},
-			"OrderLineInput": {
-				"productId": {
-					TargetName: "product_id",
+			"Category": {
+				"id": {
+					TargetName: "id",
 				},
-				"quantity": {
-					TargetName: "quantity",
+				"name": {
+					TargetName: "name",
 				},
-				"modifiers": {
-					TargetName: "modifiers",
+				"kind": {
+					TargetName: "kind",
+				},
+				"productCount": {
+					TargetName: "product_count",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"filters": "filters",
+					},
+				},
+				"subcategories": {
+					TargetName: "subcategories",
+				},
+				"popularityScore": {
+					TargetName: "popularity_score",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"threshold": "threshold",
+					},
+				},
+				"categoryMetrics": {
+					TargetName: "category_metrics",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"metricType": "metric_type",
+					},
+				},
+				"mascot": {
+					TargetName: "mascot",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"includeVolume": "include_volume",
+					},
+				},
+				"categoryStatus": {
+					TargetName: "category_status",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"checkHealth": "check_health",
+					},
+				},
+			},
+			"Subcategory": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"description": {
+					TargetName: "description",
+				},
+				"isActive": {
+					TargetName: "is_active",
+				},
+				"itemCount": {
+					TargetName: "item_count",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"filters": "filters",
+					},
+				},
+			},
+			"CategoryMetrics": {
+				"id": {
+					TargetName: "id",
+				},
+				"metricType": {
+					TargetName: "metric_type",
+				},
+				"value": {
+					TargetName: "value",
+				},
+				"timestamp": {
+					TargetName: "timestamp",
+				},
+				"categoryId": {
+					TargetName: "category_id",
+				},
+				"normalizedScore": {
+					TargetName: "normalized_score",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"baseline": "baseline",
+					},
+				},
+				"relatedCategory": {
+					TargetName: "related_category",
+				},
+			},
+			"Cat": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"kind": {
+					TargetName: "kind",
+				},
+				"meowVolume": {
+					TargetName: "meow_volume",
+				},
+				"owner": {
+					TargetName: "owner",
+				},
+				"breed": {
+					TargetName: "breed",
+				},
+			},
+			"Dog": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"kind": {
+					TargetName: "kind",
+				},
+				"barkVolume": {
+					TargetName: "bark_volume",
+				},
+				"owner": {
+					TargetName: "owner",
+				},
+				"breed": {
+					TargetName: "breed",
+				},
+			},
+			"Owner": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"contact": {
+					TargetName: "contact",
+				},
+			},
+			"ContactInfo": {
+				"email": {
+					TargetName: "email",
+				},
+				"phone": {
+					TargetName: "phone",
+				},
+				"address": {
+					TargetName: "address",
+				},
+			},
+			"Address": {
+				"street": {
+					TargetName: "street",
+				},
+				"city": {
+					TargetName: "city",
+				},
+				"country": {
+					TargetName: "country",
+				},
+				"zipCode": {
+					TargetName: "zip_code",
+				},
+			},
+			"CatBreed": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"origin": {
+					TargetName: "origin",
+				},
+				"characteristics": {
+					TargetName: "characteristics",
+				},
+			},
+			"DogBreed": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"origin": {
+					TargetName: "origin",
+				},
+				"characteristics": {
+					TargetName: "characteristics",
+				},
+			},
+			"BreedCharacteristics": {
+				"size": {
+					TargetName: "size",
+				},
+				"temperament": {
+					TargetName: "temperament",
+				},
+				"lifespan": {
+					TargetName: "lifespan",
+				},
+			},
+			"ActionSuccess": {
+				"message": {
+					TargetName: "message",
+				},
+				"timestamp": {
+					TargetName: "timestamp",
+				},
+			},
+			"ActionError": {
+				"message": {
+					TargetName: "message",
+				},
+				"code": {
+					TargetName: "code",
+				},
+			},
+			"TestContainer": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"description": {
+					TargetName: "description",
+				},
+				"details": {
+					TargetName: "details",
+					ArgumentMappings: grpcdatasource.FieldArgumentMap{
+						"includeExtended": "include_extended",
+					},
+				},
+			},
+			"TestDetails": {
+				"id": {
+					TargetName: "id",
+				},
+				"summary": {
+					TargetName: "summary",
+				},
+				"pet": {
+					TargetName: "pet",
+				},
+				"status": {
+					TargetName: "status",
+				},
+			},
+			"SearchInput": {
+				"query": {
+					TargetName: "query",
+				},
+				"limit": {
+					TargetName: "limit",
+				},
+			},
+			"ActionInput": {
+				"type": {
+					TargetName: "type",
+				},
+				"payload": {
+					TargetName: "payload",
+				},
+			},
+			"NullableFieldsType": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"optionalString": {
+					TargetName: "optional_string",
+				},
+				"optionalInt": {
+					TargetName: "optional_int",
+				},
+				"optionalFloat": {
+					TargetName: "optional_float",
+				},
+				"optionalBoolean": {
+					TargetName: "optional_boolean",
+				},
+				"requiredString": {
+					TargetName: "required_string",
+				},
+				"requiredInt": {
+					TargetName: "required_int",
+				},
+			},
+			"BlogPost": {
+				"id": {
+					TargetName: "id",
+				},
+				"title": {
+					TargetName: "title",
+				},
+				"content": {
+					TargetName: "content",
+				},
+				"tags": {
+					TargetName: "tags",
+				},
+				"optionalTags": {
+					TargetName: "optional_tags",
+				},
+				"categories": {
+					TargetName: "categories",
+				},
+				"keywords": {
+					TargetName: "keywords",
+				},
+				"viewCounts": {
+					TargetName: "view_counts",
+				},
+				"ratings": {
+					TargetName: "ratings",
+				},
+				"isPublished": {
+					TargetName: "is_published",
+				},
+				"tagGroups": {
+					TargetName: "tag_groups",
+				},
+				"relatedTopics": {
+					TargetName: "related_topics",
+				},
+				"commentThreads": {
+					TargetName: "comment_threads",
+				},
+				"suggestions": {
+					TargetName: "suggestions",
+				},
+				"relatedCategories": {
+					TargetName: "related_categories",
+				},
+				"contributors": {
+					TargetName: "contributors",
+				},
+				"mentionedProducts": {
+					TargetName: "mentioned_products",
+				},
+				"mentionedUsers": {
+					TargetName: "mentioned_users",
+				},
+				"categoryGroups": {
+					TargetName: "category_groups",
+				},
+				"contributorTeams": {
+					TargetName: "contributor_teams",
+				},
+			},
+			"Author": {
+				"id": {
+					TargetName: "id",
+				},
+				"name": {
+					TargetName: "name",
+				},
+				"email": {
+					TargetName: "email",
+				},
+				"skills": {
+					TargetName: "skills",
+				},
+				"languages": {
+					TargetName: "languages",
+				},
+				"socialLinks": {
+					TargetName: "social_links",
+				},
+				"teamsByProject": {
+					TargetName: "teams_by_project",
+				},
+				"collaborations": {
+					TargetName: "collaborations",
+				},
+				"writtenPosts": {
+					TargetName: "written_posts",
+				},
+				"favoriteCategories": {
+					TargetName: "favorite_categories",
+				},
+				"relatedAuthors": {
+					TargetName: "related_authors",
+				},
+				"productReviews": {
+					TargetName: "product_reviews",
+				},
+				"authorGroups": {
+					TargetName: "author_groups",
+				},
+				"categoryPreferences": {
+					TargetName: "category_preferences",
+				},
+				"projectTeams": {
+					TargetName: "project_teams",
+				},
+			},
+			"BlogPostInput": {
+				"title": {
+					TargetName: "title",
+				},
+				"content": {
+					TargetName: "content",
+				},
+				"tags": {
+					TargetName: "tags",
+				},
+				"optionalTags": {
+					TargetName: "optional_tags",
+				},
+				"categories": {
+					TargetName: "categories",
+				},
+				"keywords": {
+					TargetName: "keywords",
+				},
+				"viewCounts": {
+					TargetName: "view_counts",
+				},
+				"ratings": {
+					TargetName: "ratings",
+				},
+				"isPublished": {
+					TargetName: "is_published",
+				},
+				"tagGroups": {
+					TargetName: "tag_groups",
+				},
+				"relatedTopics": {
+					TargetName: "related_topics",
+				},
+				"commentThreads": {
+					TargetName: "comment_threads",
+				},
+				"suggestions": {
+					TargetName: "suggestions",
+				},
+				"relatedCategories": {
+					TargetName: "related_categories",
+				},
+				"contributors": {
+					TargetName: "contributors",
+				},
+				"categoryGroups": {
+					TargetName: "category_groups",
+				},
+			},
+			"AuthorInput": {
+				"name": {
+					TargetName: "name",
+				},
+				"email": {
+					TargetName: "email",
+				},
+				"skills": {
+					TargetName: "skills",
+				},
+				"languages": {
+					TargetName: "languages",
+				},
+				"socialLinks": {
+					TargetName: "social_links",
+				},
+				"teamsByProject": {
+					TargetName: "teams_by_project",
+				},
+				"collaborations": {
+					TargetName: "collaborations",
+				},
+				"favoriteCategories": {
+					TargetName: "favorite_categories",
+				},
+				"authorGroups": {
+					TargetName: "author_groups",
+				},
+				"projectTeams": {
+					TargetName: "project_teams",
+				},
+			},
+			"BlogPostFilter": {
+				"title": {
+					TargetName: "title",
+				},
+				"hasCategories": {
+					TargetName: "has_categories",
+				},
+				"minTags": {
+					TargetName: "min_tags",
+				},
+			},
+			"AuthorFilter": {
+				"name": {
+					TargetName: "name",
+				},
+				"hasTeams": {
+					TargetName: "has_teams",
+				},
+				"skillCount": {
+					TargetName: "skill_count",
+				},
+			},
+			"NullableFieldsInput": {
+				"name": {
+					TargetName: "name",
+				},
+				"optionalString": {
+					TargetName: "optional_string",
+				},
+				"optionalInt": {
+					TargetName: "optional_int",
+				},
+				"optionalFloat": {
+					TargetName: "optional_float",
+				},
+				"optionalBoolean": {
+					TargetName: "optional_boolean",
+				},
+				"requiredString": {
+					TargetName: "required_string",
+				},
+				"requiredInt": {
+					TargetName: "required_int",
+				},
+			},
+			"NullableFieldsFilter": {
+				"name": {
+					TargetName: "name",
+				},
+				"optionalString": {
+					TargetName: "optional_string",
+				},
+				"includeNulls": {
+					TargetName: "include_nulls",
+				},
+			},
+			"CategoryInput": {
+				"name": {
+					TargetName: "name",
+				},
+				"kind": {
+					TargetName: "kind",
+				},
+			},
+			"ProductCountFilter": {
+				"minPrice": {
+					TargetName: "min_price",
+				},
+				"maxPrice": {
+					TargetName: "max_price",
+				},
+				"inStock": {
+					TargetName: "in_stock",
+				},
+				"searchTerm": {
+					TargetName: "search_term",
+				},
+			},
+			"SubcategoryItemFilter": {
+				"minPrice": {
+					TargetName: "min_price",
+				},
+				"maxPrice": {
+					TargetName: "max_price",
+				},
+				"inStock": {
+					TargetName: "in_stock",
+				},
+				"isActive": {
+					TargetName: "is_active",
+				},
+				"searchTerm": {
+					TargetName: "search_term",
+				},
+			},
+			"ShippingEstimateInput": {
+				"destination": {
+					TargetName: "destination",
+				},
+				"weight": {
+					TargetName: "weight",
+				},
+				"expedited": {
+					TargetName: "expedited",
+				},
+			},
+			"UserInput": {
+				"name": {
+					TargetName: "name",
 				},
 			},
 		},
 	}
 }
 
+// MustDefaultGRPCMapping returns the default GRPC mapping
 func MustDefaultGRPCMapping(t *testing.T) *grpcdatasource.GRPCMapping {
 	mapping := DefaultGRPCMapping()
 	return mapping

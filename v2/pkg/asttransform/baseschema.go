@@ -148,7 +148,7 @@ scalar Boolean
 scalar ID
 "Directs the executor to include this field or fragment only when the argument is true."
 directive @include(
-    " Included when true."
+    "Included when true."
     if: Boolean!
 ) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 "Directs the executor to skip this field or fragment when the argument is true."
@@ -167,6 +167,13 @@ directive @deprecated(
 ) on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE
 
 directive @specifiedBy(url: String!) on SCALAR
+
+"""
+The @oneOf built-in directive marks an input object as a OneOf Input Object.
+Exactly one field must be provided and its value must be non-null at runtime.
+All fields defined within a @oneOf input must be nullable in the schema.
+"""
+directive @oneOf on INPUT_OBJECT
 
 """
 A Directive provides a way to describe alternate runtime execution and type validation behavior in a GraphQL document.

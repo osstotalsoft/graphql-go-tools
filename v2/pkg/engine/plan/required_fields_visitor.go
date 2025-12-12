@@ -12,29 +12,42 @@ import (
 )
 
 const (
-	requiredFieldsFragmentTemplate             = `fragment Key on %s {%s}`
-	requiredFieldsFragmentTemplateWithTypeName = `fragment Key on %s { __typename %s}`
+	keyFieldsFragmentTemplate = `fragment Key on %s {%s}`
+	requiresFragmentTemplate  = `fragment Requires_for_%s on %s { %s }`
 )
 
-func RequiredFieldsFragment(typeName, requiredFields string, includeTypename bool) (*ast.Document, *operationreport.Report) {
-	template := requiredFieldsFragmentTemplate
+func RequiredFieldsFragmentString(typeName, fieldName, requiredFields string, includeTypename bool) (fragment string) {
 	if includeTypename {
-		template = requiredFieldsFragmentTemplateWithTypeName
+		requiredFields = "__typename " + requiredFields
 	}
 
-	key, report := astparser.ParseGraphqlDocumentString(fmt.Sprintf(template, typeName, requiredFields))
+	if fieldName == "" {
+		fragment = fmt.Sprintf(keyFieldsFragmentTemplate, typeName, requiredFields)
+	} else {
+		fragment = fmt.Sprintf(requiresFragmentTemplate, fieldName, typeName, requiredFields)
+	}
+
+	return fragment
+}
+
+func RequiredFieldsFragment(typeName, requiredFields string, includeTypename bool) (*ast.Document, *operationreport.Report) {
+	return ParseRequiredFieldsFragment(typeName, "", requiredFields, includeTypename)
+}
+
+func ParseRequiredFieldsFragment(typeName, fieldName, requiredFields string, includeTypename bool) (*ast.Document, *operationreport.Report) {
+	fragment := RequiredFieldsFragmentString(typeName, fieldName, requiredFields, includeTypename)
+
+	key, report := astparser.ParseGraphqlDocumentString(fragment)
+	if report.HasErrors() {
+		return nil, &report
+	}
+
 	return &key, &report
 }
 
-func QueryPlanRequiredFieldsFragment(fieldName, typeName, requiredFields string) (*ast.Document, *operationreport.Report) {
-	var fragment string
-	if fieldName == "" {
-		fragment = fmt.Sprintf("fragment Key on %s { __typename %s }", typeName, requiredFields)
-	} else {
-		fragment = fmt.Sprintf("fragment Requires_for_%s on %s { %s }", fieldName, typeName, requiredFields)
-	}
-	key, report := astparser.ParseGraphqlDocumentString(fragment)
-	return &key, &report
+func QueryPlanRequiredFieldsFragment(typeName, fieldName, requiredFields string) (*ast.Document, *operationreport.Report) {
+	// fieldName == "" - is not fully accurate, for interface objects we do not request a __typename
+	return ParseRequiredFieldsFragment(typeName, fieldName, requiredFields, fieldName == "")
 }
 
 type addRequiredFieldsConfiguration struct {
@@ -45,6 +58,10 @@ type addRequiredFieldsConfiguration struct {
 	allowTypename                bool
 	typeName                     string
 	fieldSet                     string
+
+	// addTypenameInNestedSelections controls forced addition of __typename to nested selection sets
+	// used by "requires" keys, not only when fragments are present.
+	addTypenameInNestedSelections bool
 }
 
 type AddRequiredFieldsResult struct {
@@ -60,7 +77,7 @@ func addRequiredFields(config *addRequiredFieldsConfiguration) (out AddRequiredF
 		return out, report
 	}
 
-	walker := astvisitor.NewWalker(4)
+	walker := astvisitor.NewWalkerWithID(4, "RequiredFieldsVisitor")
 
 	visitor := &requiredFieldsVisitor{
 		Walker:            &walker,
@@ -88,6 +105,7 @@ func addRequiredFields(config *addRequiredFieldsConfiguration) (out AddRequiredF
 
 type requiredFieldsVisitor struct {
 	*astvisitor.Walker
+
 	OperationNodes []ast.Node
 	config         *addRequiredFieldsConfiguration
 	importer       *astimport.Importer
@@ -141,9 +159,11 @@ func (v *requiredFieldsVisitor) EnterSelectionSet(ref int) {
 	keySelectionSetHasFragments := len(v.key.SelectionSetInlineFragmentSelections(ref)) > 0
 
 	if operationNode.Kind == ast.NodeKindField {
+		enforcedTypename := v.config.addTypenameInNestedSelections && !v.config.isKey
 		if fieldSelectionSetRef, ok := v.config.operation.FieldSelectionSet(operationNode.Ref); ok {
 			selectionSetNode := ast.Node{Kind: ast.NodeKindSelectionSet, Ref: fieldSelectionSetRef}
-			if keySelectionSetHasFragments && !v.selectionSetHasTypeNameSelection(fieldSelectionSetRef) {
+			if (keySelectionSetHasFragments || enforcedTypename) &&
+				!v.selectionSetHasTypeNameSelection(fieldSelectionSetRef) {
 				v.addTypenameSelection(fieldSelectionSetRef)
 			}
 			v.OperationNodes = append(v.OperationNodes, selectionSetNode)
@@ -151,7 +171,7 @@ func (v *requiredFieldsVisitor) EnterSelectionSet(ref int) {
 		}
 
 		selectionSetNode := v.config.operation.AddSelectionSet()
-		if keySelectionSetHasFragments {
+		if keySelectionSetHasFragments || enforcedTypename {
 			v.addTypenameSelection(selectionSetNode.Ref)
 		}
 

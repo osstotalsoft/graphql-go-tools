@@ -176,7 +176,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 						},
 					},
 				},
-			}, Context{ctx: context.Background()}, `{"data":{"user":{"account":{"name":"John Doe","shippingInfo":{"zip":"12345"}}}}}`
+			}, *NewContext(context.Background()), `{"data":{"user":{"account":{"name":"John Doe","shippingInfo":{"zip":"12345"}}}}}`
 		}))
 
 		t.Run("federation with shareable", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -367,7 +367,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 						},
 					},
 				},
-			}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"me":{"details":{"forename":"John","surname":"Smith","middlename":"A","age":21}}}}`
+			}, *NewContext(context.Background()), `{"data":{"me":{"details":{"forename":"John","surname":"Smith","middlename":"A","age":21}}}}`
 		}))
 	})
 
@@ -523,7 +523,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"user":{"name":"Bill","infoOrAddress":[{"age":21},{"line1":"Munich"}]}}}`
+				}, *NewContext(context.Background()), `{"data":{"user":{"name":"Bill","infoOrAddress":[{"age":21},{"line1":"Munich"}]}}}`
 			}))
 
 			t.Run("batching on union - all not matching items", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -669,7 +669,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"user":{"name":"Bill","infoOrAddress":[{},{}]}}}`
+				}, *NewContext(context.Background()), `{"data":{"user":{"name":"Bill","infoOrAddress":[{},{}]}}}`
 			}))
 
 			t.Run("batching on a field", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -813,7 +813,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"users":[{"name":"Bill","info":{"age":21}},{"name":"John","info":{"age":22}},{"name":"Jane","info":{"age":23}}]}}`
+				}, *NewContext(context.Background()), `{"data":{"users":[{"name":"Bill","info":{"age":21}},{"name":"John","info":{"age":22}},{"name":"Jane","info":{"age":23}}]}}`
 			}))
 
 			t.Run("batching with duplicates", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -954,7 +954,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"users":[{"name":"Bill","info":{"age":77}},{"name":"John","info":{"age":77}},{"name":"Jane","info":{"age":77}}]}}`
+				}, *NewContext(context.Background()), `{"data":{"users":[{"name":"Bill","info":{"age":77}},{"name":"John","info":{"age":77}},{"name":"Jane","info":{"age":77}}]}}`
 			}))
 
 			t.Run("batching with null entry", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -1099,7 +1099,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"users":[{"name":"Bill","info":{"age":21}},{"name":"John","info":null},{"name":"Jane","info":{"age":23}}]}}`
+				}, *NewContext(context.Background()), `{"data":{"users":[{"name":"Bill","info":{"age":21}},{"name":"John","info":null},{"name":"Jane","info":{"age":23}}]}}`
 			}))
 
 			t.Run("batching with all null entries", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -1237,7 +1237,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"users":[{"name":"Bill","info":null},{"name":"John","info":null},{"name":"Jane","info":null}]}}`
+				}, *NewContext(context.Background()), `{"data":{"users":[{"name":"Bill","info":null},{"name":"John","info":null},{"name":"Jane","info":null}]}}`
 			}))
 
 			t.Run("batching with render error", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -1382,7 +1382,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"errors":[{"message":"Cannot return null for non-nullable field 'Query.users.info.age'.","path":["users",0,"info","age"]}],"data":null}`
+				}, *NewContext(context.Background()), `{"errors":[{"message":"Cannot return null for non-nullable field 'Query.users.info.age'.","path":["users",0,"info","age"]}],"data":null}`
 			}))
 		})
 
@@ -1518,7 +1518,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"user":{"name":"Bill","info":{"age":21}}}}`
+				}, *NewContext(context.Background()), `{"data":{"user":{"name":"Bill","info":{"age":21}}}}`
 			}))
 
 			t.Run("null info data", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -1646,7 +1646,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"user":{"name":"Bill","info":null}}}`
+				}, *NewContext(context.Background()), `{"data":{"user":{"name":"Bill","info":null}}}`
 			}))
 
 			t.Run("wrong type data", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -1774,7 +1774,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"errors":[{"message":"Cannot return null for non-nullable field 'Query.user.info.age'.","path":["user","info","age"]}],"data":{"user":{"name":"Bill","info":null}}}`
+				}, *NewContext(context.Background()), `{"errors":[{"message":"Cannot return null for non-nullable field 'Query.user.info.age'.","path":["user","info","age"]}],"data":{"user":{"name":"Bill","info":null}}}`
 			}))
 
 			t.Run("not matching type data", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -1903,7 +1903,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 							},
 						},
 					},
-				}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"user":{"name":"Bill","info":{}}}}`
+				}, *NewContext(context.Background()), `{"data":{"user":{"name":"Bill","info":{}}}}`
 			}))
 		})
 	})
@@ -2145,7 +2145,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 					},
 				},
 			},
-		}, Context{ctx: context.Background()}, `{"data":{"user":{"account":{"address":{"fullAddress":"line1 line2 line3-1 city-1 country-1 zip-1"}}}}}`
+		}, *NewContext(context.Background()), `{"data":{"user":{"account":{"address":{"fullAddress":"line1 line2 line3-1 city-1 country-1 zip-1"}}}}}`
 	}))
 
 	t.Run("nested batching", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -2417,7 +2417,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 					},
 				},
 			},
-		}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"topProducts":[{"name":"Table","stock":8,"reviews":[{"body":"Love Table!","author":{"name":"user-1"}},{"body":"Prefer other Table.","author":{"name":"user-2"}}]},{"name":"Couch","stock":2,"reviews":[{"body":"Couch Too expensive.","author":{"name":"user-1"}}]},{"name":"Chair","stock":5,"reviews":[{"body":"Chair Could be better.","author":{"name":"user-2"}}]}]}}`
+		}, *NewContext(context.Background()), `{"data":{"topProducts":[{"name":"Table","stock":8,"reviews":[{"body":"Love Table!","author":{"name":"user-1"}},{"body":"Prefer other Table.","author":{"name":"user-2"}}]},{"name":"Couch","stock":2,"reviews":[{"body":"Couch Too expensive.","author":{"name":"user-1"}}]},{"name":"Chair","stock":5,"reviews":[{"body":"Chair Could be better.","author":{"name":"user-2"}}]}]}}`
 	}))
 
 	t.Run("nested batching single root result", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -2689,7 +2689,7 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 					},
 				},
 			},
-		}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"topProducts":[{"name":"Table","stock":8,"reviews":[{"body":"Love Table!","author":{"name":"user-1"}}]}]}}`
+		}, *NewContext(context.Background()), `{"data":{"topProducts":[{"name":"Table","stock":8,"reviews":[{"body":"Love Table!","author":{"name":"user-1"}}]}]}}`
 	}))
 
 	t.Run("nested batching of direct array children", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
@@ -2829,6 +2829,163 @@ func TestResolveGraphQLResponse_Federation(t *testing.T) {
 					},
 				},
 			},
-		}, Context{ctx: context.Background(), Variables: nil}, `{"data":{"accounts":[{"name":"User"},{"type":"super"},{"subject":"posts"}]}}`
+		}, *NewContext(context.Background()), `{"data":{"accounts":[{"name":"User"},{"type":"super"},{"subject":"posts"}]}}`
+	}))
+
+	t.Run("nested fetch should apply to only single type", testFn(func(t *testing.T, ctrl *gomock.Controller) (node *GraphQLResponse, ctx Context, expectedOutput string) {
+
+		accountsService := mockedDS(t, ctrl,
+			`{"method":"POST","url":"http://accounts","body":{"query":"{accounts {__typename ... on User {some {__typename id}} ... on Admin {some {__typename id}}}}"}}`,
+			`{"accounts":[{"__typename":"User","some":{"__typename":"User","id":"1"}},{"__typename":"Admin","some":{"__typename":"User","id":"2"}},{"__typename":"User","some":{"__typename":"User","id":"3"}}]}`)
+
+		namesService := mockedDS(t, ctrl,
+			`{"method":"POST","url":"http://names","body":{"query":"query($representations: [_Any!]!){_entities(representations: $representations){... on User {__typename title}}}","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"3"}]}}}`,
+			`{"_entities":[{"__typename":"User","title":"User1"},{"__typename":"User","title":"User3"}]}`)
+
+		return &GraphQLResponse{
+			Fetches: Sequence(
+				SingleWithPath(&SingleFetch{
+					InputTemplate: InputTemplate{
+						Segments: []TemplateSegment{
+							{
+								Data:        []byte(`{"method":"POST","url":"http://accounts","body":{"query":"{accounts {__typename ... on User {some {__typename id}} ... on Admin {some {__typename id}}}}"}}`),
+								SegmentType: StaticSegmentType,
+							},
+						},
+					},
+					FetchConfiguration: FetchConfiguration{
+						DataSource: accountsService,
+						PostProcessing: PostProcessingConfiguration{
+							SelectResponseDataPath: []string{"data"},
+						},
+					},
+				}, "query"),
+				SingleWithPath(&BatchEntityFetch{
+					Input: BatchInput{
+						Header: InputTemplate{
+							Segments: []TemplateSegment{
+								{
+									Data:        []byte(`{"method":"POST","url":"http://names","body":{"query":"query($representations: [_Any!]!){_entities(representations: $representations){... on User {__typename title}}}","variables":{"representations":[`),
+									SegmentType: StaticSegmentType,
+								},
+							},
+						},
+						Items: []InputTemplate{
+							{
+								Segments: []TemplateSegment{
+									{
+										SegmentType:  VariableSegmentType,
+										VariableKind: ResolvableObjectVariableKind,
+										Renderer: NewGraphQLVariableResolveRenderer(&Object{
+											Fields: []*Field{
+												{
+													Name: []byte("__typename"),
+													Value: &String{
+														Path: []string{"__typename"},
+													},
+													OnTypeNames: [][]byte{[]byte("User")},
+												},
+												{
+													Name: []byte("id"),
+													Value: &String{
+														Path: []string{"id"},
+													},
+													OnTypeNames: [][]byte{[]byte("User")},
+												},
+											},
+										}),
+									},
+								},
+							},
+						},
+						Separator: InputTemplate{
+							Segments: []TemplateSegment{
+								{
+									Data:        []byte(`,`),
+									SegmentType: StaticSegmentType,
+								},
+							},
+						},
+						Footer: InputTemplate{
+							Segments: []TemplateSegment{
+								{
+									Data:        []byte(`]}}}`),
+									SegmentType: StaticSegmentType,
+								},
+							},
+						},
+					},
+					DataSource: namesService,
+					PostProcessing: PostProcessingConfiguration{
+						SelectResponseDataPath: []string{"data", "_entities"},
+					},
+				}, "accounts.@.some", ArrayPath("accounts"), PathElementWithTypeNames(ObjectPath("some"), []string{"User"})),
+			),
+			Data: &Object{
+				Fields: []*Field{
+					{
+						Name: []byte("accounts"),
+						Value: &Array{
+							Path: []string{"accounts"},
+							Item: &Object{
+								Nullable: false,
+								PossibleTypes: map[string]struct{}{
+									"Admin": {},
+									"User":  {},
+								},
+								TypeName: "Node",
+								Fields: []*Field{
+									{
+										Name: []byte("some"),
+										Value: &Object{
+											Path: []string{"some"},
+											PossibleTypes: map[string]struct{}{
+												"User": {},
+											},
+											TypeName: "User",
+											Fields: []*Field{
+												{
+													Name: []byte("title"),
+													Value: &String{
+														Path: []string{"title"},
+													},
+												},
+											},
+										},
+										OnTypeNames: [][]byte{[]byte("User")},
+									},
+									{
+										Name: []byte("some"),
+										Value: &Object{
+											Path: []string{"some"},
+											PossibleTypes: map[string]struct{}{
+												"User": {},
+											},
+											TypeName: "User",
+											Fields: []*Field{
+												{
+													Name: []byte("__typename"),
+													Value: &String{
+														Path:       []string{"__typename"},
+														IsTypeName: true,
+													},
+												},
+												{
+													Name: []byte("id"),
+													Value: &Scalar{
+														Path: []string{"id"},
+													},
+												},
+											},
+										},
+										OnTypeNames: [][]byte{[]byte("Admin")},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}, *NewContext(context.Background()), `{"data":{"accounts":[{"some":{"title":"User1"}},{"some":{"__typename":"User","id":"2"}},{"some":{"title":"User3"}}]}}`
 	}))
 }

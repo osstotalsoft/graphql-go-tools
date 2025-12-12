@@ -3,14 +3,40 @@ package productv1;
 
 option go_package = "cosmo/pkg/proto/productv1;productv1";
 
+import "google/protobuf/wrappers.proto";
+
 // Service definition for ProductService
 service ProductService {
   // Lookup Product entity by id
   rpc LookupProductById(LookupProductByIdRequest) returns (LookupProductByIdResponse) {}
   // Lookup Storage entity by id
   rpc LookupStorageById(LookupStorageByIdRequest) returns (LookupStorageByIdResponse) {}
+  // Lookup Warehouse entity by id
+  rpc LookupWarehouseById(LookupWarehouseByIdRequest) returns (LookupWarehouseByIdResponse) {}
+  rpc MutationBulkCreateAuthors(MutationBulkCreateAuthorsRequest) returns (MutationBulkCreateAuthorsResponse) {}
+  rpc MutationBulkCreateBlogPosts(MutationBulkCreateBlogPostsRequest) returns (MutationBulkCreateBlogPostsResponse) {}
+  rpc MutationBulkUpdateAuthors(MutationBulkUpdateAuthorsRequest) returns (MutationBulkUpdateAuthorsResponse) {}
+  rpc MutationBulkUpdateBlogPosts(MutationBulkUpdateBlogPostsRequest) returns (MutationBulkUpdateBlogPostsResponse) {}
+  rpc MutationCreateAuthor(MutationCreateAuthorRequest) returns (MutationCreateAuthorResponse) {}
+  rpc MutationCreateBlogPost(MutationCreateBlogPostRequest) returns (MutationCreateBlogPostResponse) {}
+  rpc MutationCreateNullableFieldsType(MutationCreateNullableFieldsTypeRequest) returns (MutationCreateNullableFieldsTypeResponse) {}
   rpc MutationCreateUser(MutationCreateUserRequest) returns (MutationCreateUserResponse) {}
+  rpc MutationPerformAction(MutationPerformActionRequest) returns (MutationPerformActionResponse) {}
+  rpc MutationUpdateAuthor(MutationUpdateAuthorRequest) returns (MutationUpdateAuthorResponse) {}
+  rpc MutationUpdateBlogPost(MutationUpdateBlogPostRequest) returns (MutationUpdateBlogPostResponse) {}
+  rpc MutationUpdateNullableFieldsType(MutationUpdateNullableFieldsTypeRequest) returns (MutationUpdateNullableFieldsTypeResponse) {}
+  rpc QueryAllAuthors(QueryAllAuthorsRequest) returns (QueryAllAuthorsResponse) {}
+  rpc QueryAllBlogPosts(QueryAllBlogPostsRequest) returns (QueryAllBlogPostsResponse) {}
+  rpc QueryAllNullableFieldsTypes(QueryAllNullableFieldsTypesRequest) returns (QueryAllNullableFieldsTypesResponse) {}
   rpc QueryAllPets(QueryAllPetsRequest) returns (QueryAllPetsResponse) {}
+  rpc QueryAuthor(QueryAuthorRequest) returns (QueryAuthorResponse) {}
+  rpc QueryAuthorById(QueryAuthorByIdRequest) returns (QueryAuthorByIdResponse) {}
+  rpc QueryAuthorsWithFilter(QueryAuthorsWithFilterRequest) returns (QueryAuthorsWithFilterResponse) {}
+  rpc QueryBlogPost(QueryBlogPostRequest) returns (QueryBlogPostResponse) {}
+  rpc QueryBlogPostById(QueryBlogPostByIdRequest) returns (QueryBlogPostByIdResponse) {}
+  rpc QueryBlogPostsWithFilter(QueryBlogPostsWithFilterRequest) returns (QueryBlogPostsWithFilterResponse) {}
+  rpc QueryBulkSearchAuthors(QueryBulkSearchAuthorsRequest) returns (QueryBulkSearchAuthorsResponse) {}
+  rpc QueryBulkSearchBlogPosts(QueryBulkSearchBlogPostsRequest) returns (QueryBulkSearchBlogPostsResponse) {}
   rpc QueryCalculateTotals(QueryCalculateTotalsRequest) returns (QueryCalculateTotalsResponse) {}
   rpc QueryCategories(QueryCategoriesRequest) returns (QueryCategoriesResponse) {}
   rpc QueryCategoriesByKind(QueryCategoriesByKindRequest) returns (QueryCategoriesByKindResponse) {}
@@ -18,164 +44,930 @@ service ProductService {
   rpc QueryComplexFilterType(QueryComplexFilterTypeRequest) returns (QueryComplexFilterTypeResponse) {}
   rpc QueryFilterCategories(QueryFilterCategoriesRequest) returns (QueryFilterCategoriesResponse) {}
   rpc QueryNestedType(QueryNestedTypeRequest) returns (QueryNestedTypeResponse) {}
+  rpc QueryNullableFieldsType(QueryNullableFieldsTypeRequest) returns (QueryNullableFieldsTypeResponse) {}
+  rpc QueryNullableFieldsTypeById(QueryNullableFieldsTypeByIdRequest) returns (QueryNullableFieldsTypeByIdResponse) {}
+  rpc QueryNullableFieldsTypeWithFilter(QueryNullableFieldsTypeWithFilterRequest) returns (QueryNullableFieldsTypeWithFilterResponse) {}
   rpc QueryRandomPet(QueryRandomPetRequest) returns (QueryRandomPetResponse) {}
+  rpc QueryRandomSearchResult(QueryRandomSearchResultRequest) returns (QueryRandomSearchResultResponse) {}
   rpc QueryRecursiveType(QueryRecursiveTypeRequest) returns (QueryRecursiveTypeResponse) {}
+  rpc QuerySearch(QuerySearchRequest) returns (QuerySearchResponse) {}
+  rpc QueryTestContainer(QueryTestContainerRequest) returns (QueryTestContainerResponse) {}
+  rpc QueryTestContainers(QueryTestContainersRequest) returns (QueryTestContainersResponse) {}
   rpc QueryTypeFilterWithArguments(QueryTypeFilterWithArgumentsRequest) returns (QueryTypeFilterWithArgumentsResponse) {}
   rpc QueryTypeWithMultipleFilterFields(QueryTypeWithMultipleFilterFieldsRequest) returns (QueryTypeWithMultipleFilterFieldsResponse) {}
   rpc QueryUser(QueryUserRequest) returns (QueryUserResponse) {}
   rpc QueryUsers(QueryUsersRequest) returns (QueryUsersResponse) {}
+  rpc ResolveCategoryCategoryMetrics(ResolveCategoryCategoryMetricsRequest) returns (ResolveCategoryCategoryMetricsResponse) {}
+  rpc ResolveCategoryCategoryStatus(ResolveCategoryCategoryStatusRequest) returns (ResolveCategoryCategoryStatusResponse) {}
+  rpc ResolveCategoryMascot(ResolveCategoryMascotRequest) returns (ResolveCategoryMascotResponse) {}
+  rpc ResolveCategoryMetricsNormalizedScore(ResolveCategoryMetricsNormalizedScoreRequest) returns (ResolveCategoryMetricsNormalizedScoreResponse) {}
+  rpc ResolveCategoryPopularityScore(ResolveCategoryPopularityScoreRequest) returns (ResolveCategoryPopularityScoreResponse) {}
+  rpc ResolveCategoryProductCount(ResolveCategoryProductCountRequest) returns (ResolveCategoryProductCountResponse) {}
+  rpc ResolveProductMascotRecommendation(ResolveProductMascotRecommendationRequest) returns (ResolveProductMascotRecommendationResponse) {}
+  rpc ResolveProductProductDetails(ResolveProductProductDetailsRequest) returns (ResolveProductProductDetailsResponse) {}
+  rpc ResolveProductRecommendedCategory(ResolveProductRecommendedCategoryRequest) returns (ResolveProductRecommendedCategoryResponse) {}
+  rpc ResolveProductShippingEstimate(ResolveProductShippingEstimateRequest) returns (ResolveProductShippingEstimateResponse) {}
+  rpc ResolveProductStockStatus(ResolveProductStockStatusRequest) returns (ResolveProductStockStatusResponse) {}
+  rpc ResolveSubcategoryItemCount(ResolveSubcategoryItemCountRequest) returns (ResolveSubcategoryItemCountResponse) {}
+  rpc ResolveTestContainerDetails(ResolveTestContainerDetailsRequest) returns (ResolveTestContainerDetailsResponse) {}
 }
 
+// Wrapper message for a list of AuthorFilter.
+message ListOfAuthorFilter {
+  message List {
+    repeated AuthorFilter items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of AuthorInput.
+message ListOfAuthorInput {
+  message List {
+    repeated AuthorInput items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of BlogPost.
+message ListOfBlogPost {
+  message List {
+    repeated BlogPost items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of BlogPostFilter.
+message ListOfBlogPostFilter {
+  message List {
+    repeated BlogPostFilter items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of BlogPostInput.
+message ListOfBlogPostInput {
+  message List {
+    repeated BlogPostInput items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of Boolean.
+message ListOfBoolean {
+  message List {
+    repeated bool items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of Category.
+message ListOfCategory {
+  message List {
+    repeated Category items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of CategoryInput.
+message ListOfCategoryInput {
+  message List {
+    repeated CategoryInput items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of Float.
+message ListOfFloat {
+  message List {
+    repeated double items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of Category.
+message ListOfListOfCategory {
+  message List {
+    repeated ListOfCategory items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of CategoryInput.
+message ListOfListOfCategoryInput {
+  message List {
+    repeated ListOfCategoryInput items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of String.
+message ListOfListOfString {
+  message List {
+    repeated ListOfString items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of User.
+message ListOfListOfUser {
+  message List {
+    repeated ListOfUser items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of UserInput.
+message ListOfListOfUserInput {
+  message List {
+    repeated ListOfUserInput items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of OrderLine.
+message ListOfOrderLine {
+  message List {
+    repeated OrderLine items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of Product.
+message ListOfProduct {
+  message List {
+    repeated Product items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of String.
+message ListOfString {
+  message List {
+    repeated string items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of Subcategory.
+message ListOfSubcategory {
+  message List {
+    repeated Subcategory items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of User.
+message ListOfUser {
+  message List {
+    repeated User items = 1;
+  }
+  List list = 1;
+}
+// Wrapper message for a list of UserInput.
+message ListOfUserInput {
+  message List {
+    repeated UserInput items = 1;
+  }
+  List list = 1;
+}
 // Key message for Product entity lookup
 message LookupProductByIdRequestKey {
-  // Key field for Product entity lookup
+  // Key field for Product entity lookup.
   string id = 1;
 }
 
-// Request message for Product entity lookup
+// Request message for Product entity lookup.
 message LookupProductByIdRequest {
-  // List of keys to look up Product entities
+  /*
+   * List of keys to look up Product entities.
+   * Order matters - each key maps to one entity in LookupProductByIdResponse.
+   */
   repeated LookupProductByIdRequestKey keys = 1;
 }
 
-// Response message for Product entity lookup
+// Response message for Product entity lookup.
 message LookupProductByIdResponse {
-  // List of Product entities matching the requested keys
+  /*
+   * List of Product entities in the same order as the keys in LookupProductByIdRequest.
+   * Always return the same number of entities as keys. Use null for entities that cannot be found.
+   * 
+   * Example:
+   *   LookupUserByIdRequest:
+   *     keys:
+   *       - id: 1
+   *       - id: 2
+   *   LookupUserByIdResponse:
+   *     result:
+   *       - id: 1 # User with id 1 found
+   *       - null  # User with id 2 not found
+   */
   repeated Product result = 1;
 }
 
 // Key message for Storage entity lookup
 message LookupStorageByIdRequestKey {
-  // Key field for Storage entity lookup
+  // Key field for Storage entity lookup.
   string id = 1;
 }
 
-// Request message for Storage entity lookup
+// Request message for Storage entity lookup.
 message LookupStorageByIdRequest {
-  // List of keys to look up Storage entities
+  /*
+   * List of keys to look up Storage entities.
+   * Order matters - each key maps to one entity in LookupStorageByIdResponse.
+   */
   repeated LookupStorageByIdRequestKey keys = 1;
 }
 
-// Response message for Storage entity lookup
+// Response message for Storage entity lookup.
 message LookupStorageByIdResponse {
-  // List of Storage entities matching the requested keys
+  /*
+   * List of Storage entities in the same order as the keys in LookupStorageByIdRequest.
+   * Always return the same number of entities as keys. Use null for entities that cannot be found.
+   * 
+   * Example:
+   *   LookupUserByIdRequest:
+   *     keys:
+   *       - id: 1
+   *       - id: 2
+   *   LookupUserByIdResponse:
+   *     result:
+   *       - id: 1 # User with id 1 found
+   *       - null  # User with id 2 not found
+   */
   repeated Storage result = 1;
 }
 
-// Request message for users operation
+// Key message for Warehouse entity lookup
+message LookupWarehouseByIdRequestKey {
+  // Key field for Warehouse entity lookup.
+  string id = 1;
+}
+
+// Request message for Warehouse entity lookup.
+message LookupWarehouseByIdRequest {
+  /*
+   * List of keys to look up Warehouse entities.
+   * Order matters - each key maps to one entity in LookupWarehouseByIdResponse.
+   */
+  repeated LookupWarehouseByIdRequestKey keys = 1;
+}
+
+// Response message for Warehouse entity lookup.
+message LookupWarehouseByIdResponse {
+  /*
+   * List of Warehouse entities in the same order as the keys in LookupWarehouseByIdRequest.
+   * Always return the same number of entities as keys. Use null for entities that cannot be found.
+   * 
+   * Example:
+   *   LookupUserByIdRequest:
+   *     keys:
+   *       - id: 1
+   *       - id: 2
+   *   LookupUserByIdResponse:
+   *     result:
+   *       - id: 1 # User with id 1 found
+   *       - null  # User with id 2 not found
+   */
+  repeated Warehouse result = 1;
+}
+
+// Request message for users operation.
 message QueryUsersRequest {
 }
-// Response message for users operation
+// Response message for users operation.
 message QueryUsersResponse {
   repeated User users = 1;
 }
-// Request message for user operation
+// Request message for user operation.
 message QueryUserRequest {
   string id = 1;
 }
-// Response message for user operation
+// Response message for user operation.
 message QueryUserResponse {
   User user = 1;
 }
-// Request message for nestedType operation
+// Request message for nestedType operation.
 message QueryNestedTypeRequest {
 }
-// Response message for nestedType operation
+// Response message for nestedType operation.
 message QueryNestedTypeResponse {
   repeated NestedTypeA nested_type = 1;
 }
-// Request message for recursiveType operation
+// Request message for recursiveType operation.
 message QueryRecursiveTypeRequest {
 }
-// Response message for recursiveType operation
+// Response message for recursiveType operation.
 message QueryRecursiveTypeResponse {
   RecursiveType recursive_type = 1;
 }
-// Request message for typeFilterWithArguments operation
+// Request message for typeFilterWithArguments operation.
 message QueryTypeFilterWithArgumentsRequest {
   string filter_field_1 = 1;
   string filter_field_2 = 2;
 }
-// Response message for typeFilterWithArguments operation
+// Response message for typeFilterWithArguments operation.
 message QueryTypeFilterWithArgumentsResponse {
   repeated TypeWithMultipleFilterFields type_filter_with_arguments = 1;
 }
-// Request message for typeWithMultipleFilterFields operation
+// Request message for typeWithMultipleFilterFields operation.
 message QueryTypeWithMultipleFilterFieldsRequest {
   FilterTypeInput filter = 1;
 }
-// Response message for typeWithMultipleFilterFields operation
+// Response message for typeWithMultipleFilterFields operation.
 message QueryTypeWithMultipleFilterFieldsResponse {
   repeated TypeWithMultipleFilterFields type_with_multiple_filter_fields = 1;
 }
-// Request message for complexFilterType operation
+// Request message for complexFilterType operation.
 message QueryComplexFilterTypeRequest {
   ComplexFilterTypeInput filter = 1;
 }
-// Response message for complexFilterType operation
+// Response message for complexFilterType operation.
 message QueryComplexFilterTypeResponse {
   repeated TypeWithComplexFilterInput complex_filter_type = 1;
 }
-// Request message for calculateTotals operation
+// Request message for calculateTotals operation.
 message QueryCalculateTotalsRequest {
   repeated OrderInput orders = 1;
 }
-// Response message for calculateTotals operation
+// Response message for calculateTotals operation.
 message QueryCalculateTotalsResponse {
   repeated Order calculate_totals = 1;
 }
-// Request message for categories operation
+// Request message for categories operation.
 message QueryCategoriesRequest {
 }
-// Response message for categories operation
+// Response message for categories operation.
 message QueryCategoriesResponse {
   repeated Category categories = 1;
 }
-// Request message for categoriesByKind operation
+// Request message for categoriesByKind operation.
 message QueryCategoriesByKindRequest {
   CategoryKind kind = 1;
 }
-// Response message for categoriesByKind operation
+// Response message for categoriesByKind operation.
 message QueryCategoriesByKindResponse {
   repeated Category categories_by_kind = 1;
 }
-// Request message for categoriesByKinds operation
+// Request message for categoriesByKinds operation.
 message QueryCategoriesByKindsRequest {
   repeated CategoryKind kinds = 1;
 }
-// Response message for categoriesByKinds operation
+// Response message for categoriesByKinds operation.
 message QueryCategoriesByKindsResponse {
   repeated Category categories_by_kinds = 1;
 }
-// Request message for filterCategories operation
+// Request message for filterCategories operation.
 message QueryFilterCategoriesRequest {
   CategoryFilter filter = 1;
 }
-// Response message for filterCategories operation
+// Response message for filterCategories operation.
 message QueryFilterCategoriesResponse {
   repeated Category filter_categories = 1;
 }
-// Request message for randomPet operation
+// Request message for randomPet operation.
 message QueryRandomPetRequest {
 }
-// Response message for randomPet operation
+// Response message for randomPet operation.
 message QueryRandomPetResponse {
   Animal random_pet = 1;
 }
-// Request message for allPets operation
+// Request message for allPets operation.
 message QueryAllPetsRequest {
 }
-// Response message for allPets operation
+// Response message for allPets operation.
 message QueryAllPetsResponse {
   repeated Animal all_pets = 1;
 }
-// Request message for createUser operation
+// Request message for search operation.
+message QuerySearchRequest {
+  SearchInput input = 1;
+}
+// Response message for search operation.
+message QuerySearchResponse {
+  repeated SearchResult search = 1;
+}
+// Request message for randomSearchResult operation.
+message QueryRandomSearchResultRequest {
+}
+// Response message for randomSearchResult operation.
+message QueryRandomSearchResultResponse {
+  SearchResult random_search_result = 1;
+}
+// Request message for nullableFieldsType operation.
+message QueryNullableFieldsTypeRequest {
+}
+// Response message for nullableFieldsType operation.
+message QueryNullableFieldsTypeResponse {
+  NullableFieldsType nullable_fields_type = 1;
+}
+// Request message for nullableFieldsTypeById operation.
+message QueryNullableFieldsTypeByIdRequest {
+  string id = 1;
+}
+// Response message for nullableFieldsTypeById operation.
+message QueryNullableFieldsTypeByIdResponse {
+  NullableFieldsType nullable_fields_type_by_id = 1;
+}
+// Request message for nullableFieldsTypeWithFilter operation.
+message QueryNullableFieldsTypeWithFilterRequest {
+  NullableFieldsFilter filter = 1;
+}
+// Response message for nullableFieldsTypeWithFilter operation.
+message QueryNullableFieldsTypeWithFilterResponse {
+  repeated NullableFieldsType nullable_fields_type_with_filter = 1;
+}
+// Request message for allNullableFieldsTypes operation.
+message QueryAllNullableFieldsTypesRequest {
+}
+// Response message for allNullableFieldsTypes operation.
+message QueryAllNullableFieldsTypesResponse {
+  repeated NullableFieldsType all_nullable_fields_types = 1;
+}
+// Request message for blogPost operation.
+message QueryBlogPostRequest {
+}
+// Response message for blogPost operation.
+message QueryBlogPostResponse {
+  BlogPost blog_post = 1;
+}
+// Request message for blogPostById operation.
+message QueryBlogPostByIdRequest {
+  string id = 1;
+}
+// Response message for blogPostById operation.
+message QueryBlogPostByIdResponse {
+  BlogPost blog_post_by_id = 1;
+}
+// Request message for blogPostsWithFilter operation.
+message QueryBlogPostsWithFilterRequest {
+  BlogPostFilter filter = 1;
+}
+// Response message for blogPostsWithFilter operation.
+message QueryBlogPostsWithFilterResponse {
+  repeated BlogPost blog_posts_with_filter = 1;
+}
+// Request message for allBlogPosts operation.
+message QueryAllBlogPostsRequest {
+}
+// Response message for allBlogPosts operation.
+message QueryAllBlogPostsResponse {
+  repeated BlogPost all_blog_posts = 1;
+}
+// Request message for author operation.
+message QueryAuthorRequest {
+}
+// Response message for author operation.
+message QueryAuthorResponse {
+  Author author = 1;
+}
+// Request message for authorById operation.
+message QueryAuthorByIdRequest {
+  string id = 1;
+}
+// Response message for authorById operation.
+message QueryAuthorByIdResponse {
+  Author author_by_id = 1;
+}
+// Request message for authorsWithFilter operation.
+message QueryAuthorsWithFilterRequest {
+  AuthorFilter filter = 1;
+}
+// Response message for authorsWithFilter operation.
+message QueryAuthorsWithFilterResponse {
+  repeated Author authors_with_filter = 1;
+}
+// Request message for allAuthors operation.
+message QueryAllAuthorsRequest {
+}
+// Response message for allAuthors operation.
+message QueryAllAuthorsResponse {
+  repeated Author all_authors = 1;
+}
+// Request message for bulkSearchAuthors operation.
+message QueryBulkSearchAuthorsRequest {
+  ListOfAuthorFilter filters = 1;
+}
+// Response message for bulkSearchAuthors operation.
+message QueryBulkSearchAuthorsResponse {
+  repeated Author bulk_search_authors = 1;
+}
+// Request message for bulkSearchBlogPosts operation.
+message QueryBulkSearchBlogPostsRequest {
+  ListOfBlogPostFilter filters = 1;
+}
+// Response message for bulkSearchBlogPosts operation.
+message QueryBulkSearchBlogPostsResponse {
+  repeated BlogPost bulk_search_blog_posts = 1;
+}
+// Request message for testContainer operation.
+message QueryTestContainerRequest {
+  string id = 1;
+}
+// Response message for testContainer operation.
+message QueryTestContainerResponse {
+  TestContainer test_container = 1;
+}
+// Request message for testContainers operation.
+message QueryTestContainersRequest {
+}
+// Response message for testContainers operation.
+message QueryTestContainersResponse {
+  repeated TestContainer test_containers = 1;
+}
+// Request message for createUser operation.
 message MutationCreateUserRequest {
   UserInput input = 1;
 }
-// Response message for createUser operation
+// Response message for createUser operation.
 message MutationCreateUserResponse {
   User create_user = 1;
+}
+// Request message for performAction operation.
+message MutationPerformActionRequest {
+  ActionInput input = 1;
+}
+// Response message for performAction operation.
+message MutationPerformActionResponse {
+  ActionResult perform_action = 1;
+}
+// Request message for createNullableFieldsType operation.
+message MutationCreateNullableFieldsTypeRequest {
+  NullableFieldsInput input = 1;
+}
+// Response message for createNullableFieldsType operation.
+message MutationCreateNullableFieldsTypeResponse {
+  NullableFieldsType create_nullable_fields_type = 1;
+}
+// Request message for updateNullableFieldsType operation.
+message MutationUpdateNullableFieldsTypeRequest {
+  string id = 1;
+  NullableFieldsInput input = 2;
+}
+// Response message for updateNullableFieldsType operation.
+message MutationUpdateNullableFieldsTypeResponse {
+  NullableFieldsType update_nullable_fields_type = 1;
+}
+// Request message for createBlogPost operation.
+message MutationCreateBlogPostRequest {
+  BlogPostInput input = 1;
+}
+// Response message for createBlogPost operation.
+message MutationCreateBlogPostResponse {
+  BlogPost create_blog_post = 1;
+}
+// Request message for updateBlogPost operation.
+message MutationUpdateBlogPostRequest {
+  string id = 1;
+  BlogPostInput input = 2;
+}
+// Response message for updateBlogPost operation.
+message MutationUpdateBlogPostResponse {
+  BlogPost update_blog_post = 1;
+}
+// Request message for createAuthor operation.
+message MutationCreateAuthorRequest {
+  AuthorInput input = 1;
+}
+// Response message for createAuthor operation.
+message MutationCreateAuthorResponse {
+  Author create_author = 1;
+}
+// Request message for updateAuthor operation.
+message MutationUpdateAuthorRequest {
+  string id = 1;
+  AuthorInput input = 2;
+}
+// Response message for updateAuthor operation.
+message MutationUpdateAuthorResponse {
+  Author update_author = 1;
+}
+// Request message for bulkCreateAuthors operation.
+message MutationBulkCreateAuthorsRequest {
+  ListOfAuthorInput authors = 1;
+}
+// Response message for bulkCreateAuthors operation.
+message MutationBulkCreateAuthorsResponse {
+  repeated Author bulk_create_authors = 1;
+}
+// Request message for bulkUpdateAuthors operation.
+message MutationBulkUpdateAuthorsRequest {
+  ListOfAuthorInput authors = 1;
+}
+// Response message for bulkUpdateAuthors operation.
+message MutationBulkUpdateAuthorsResponse {
+  repeated Author bulk_update_authors = 1;
+}
+// Request message for bulkCreateBlogPosts operation.
+message MutationBulkCreateBlogPostsRequest {
+  ListOfBlogPostInput blog_posts = 1;
+}
+// Response message for bulkCreateBlogPosts operation.
+message MutationBulkCreateBlogPostsResponse {
+  repeated BlogPost bulk_create_blog_posts = 1;
+}
+// Request message for bulkUpdateBlogPosts operation.
+message MutationBulkUpdateBlogPostsRequest {
+  ListOfBlogPostInput blog_posts = 1;
+}
+// Response message for bulkUpdateBlogPosts operation.
+message MutationBulkUpdateBlogPostsResponse {
+  repeated BlogPost bulk_update_blog_posts = 1;
+}
+message ResolveProductShippingEstimateArgs {
+  ShippingEstimateInput input = 1;
+}
+
+message ResolveProductShippingEstimateContext {
+  string id = 1;
+  double price = 2;
+}
+
+message ResolveProductShippingEstimateRequest {
+  // context provides the resolver context for the field shippingEstimate of type Product.
+  repeated ResolveProductShippingEstimateContext context = 1;
+  // field_args provides the arguments for the resolver field shippingEstimate of type Product.
+  ResolveProductShippingEstimateArgs field_args = 2;
+}
+
+message ResolveProductShippingEstimateResult {
+  double shipping_estimate = 1;
+}
+
+message ResolveProductShippingEstimateResponse {
+  repeated ResolveProductShippingEstimateResult result = 1;
+}
+
+message ResolveProductRecommendedCategoryArgs {
+  int32 max_price = 1;
+}
+
+message ResolveProductRecommendedCategoryContext {
+  string id = 1;
+  string name = 2;
+  double price = 3;
+}
+
+message ResolveProductRecommendedCategoryRequest {
+  // context provides the resolver context for the field recommendedCategory of type Product.
+  repeated ResolveProductRecommendedCategoryContext context = 1;
+  // field_args provides the arguments for the resolver field recommendedCategory of type Product.
+  ResolveProductRecommendedCategoryArgs field_args = 2;
+}
+
+message ResolveProductRecommendedCategoryResult {
+  Category recommended_category = 1;
+}
+
+message ResolveProductRecommendedCategoryResponse {
+  repeated ResolveProductRecommendedCategoryResult result = 1;
+}
+
+message ResolveProductMascotRecommendationArgs {
+  bool include_details = 1;
+}
+
+message ResolveProductMascotRecommendationContext {
+  string id = 1;
+  string name = 2;
+}
+
+message ResolveProductMascotRecommendationRequest {
+  // context provides the resolver context for the field mascotRecommendation of type Product.
+  repeated ResolveProductMascotRecommendationContext context = 1;
+  // field_args provides the arguments for the resolver field mascotRecommendation of type Product.
+  ResolveProductMascotRecommendationArgs field_args = 2;
+}
+
+message ResolveProductMascotRecommendationResult {
+  Animal mascot_recommendation = 1;
+}
+
+message ResolveProductMascotRecommendationResponse {
+  repeated ResolveProductMascotRecommendationResult result = 1;
+}
+
+message ResolveProductStockStatusArgs {
+  bool check_availability = 1;
+}
+
+message ResolveProductStockStatusContext {
+  string id = 1;
+  string name = 2;
+  double price = 3;
+}
+
+message ResolveProductStockStatusRequest {
+  // context provides the resolver context for the field stockStatus of type Product.
+  repeated ResolveProductStockStatusContext context = 1;
+  // field_args provides the arguments for the resolver field stockStatus of type Product.
+  ResolveProductStockStatusArgs field_args = 2;
+}
+
+message ResolveProductStockStatusResult {
+  ActionResult stock_status = 1;
+}
+
+message ResolveProductStockStatusResponse {
+  repeated ResolveProductStockStatusResult result = 1;
+}
+
+message ResolveProductProductDetailsArgs {
+  bool include_extended = 1;
+}
+
+message ResolveProductProductDetailsContext {
+  string id = 1;
+  string name = 2;
+  double price = 3;
+}
+
+message ResolveProductProductDetailsRequest {
+  // context provides the resolver context for the field productDetails of type Product.
+  repeated ResolveProductProductDetailsContext context = 1;
+  // field_args provides the arguments for the resolver field productDetails of type Product.
+  ResolveProductProductDetailsArgs field_args = 2;
+}
+
+message ResolveProductProductDetailsResult {
+  ProductDetails product_details = 1;
+}
+
+message ResolveProductProductDetailsResponse {
+  repeated ResolveProductProductDetailsResult result = 1;
+}
+
+message ResolveCategoryProductCountArgs {
+  ProductCountFilter filters = 1;
+}
+
+message ResolveCategoryProductCountContext {
+  string id = 1;
+  string name = 2;
+}
+
+message ResolveCategoryProductCountRequest {
+  // context provides the resolver context for the field productCount of type Category.
+  repeated ResolveCategoryProductCountContext context = 1;
+  // field_args provides the arguments for the resolver field productCount of type Category.
+  ResolveCategoryProductCountArgs field_args = 2;
+}
+
+message ResolveCategoryProductCountResult {
+  int32 product_count = 1;
+}
+
+message ResolveCategoryProductCountResponse {
+  repeated ResolveCategoryProductCountResult result = 1;
+}
+
+message ResolveCategoryPopularityScoreArgs {
+  google.protobuf.Int32Value threshold = 1;
+}
+
+message ResolveCategoryPopularityScoreContext {
+  string id = 1;
+}
+
+message ResolveCategoryPopularityScoreRequest {
+  // context provides the resolver context for the field popularityScore of type Category.
+  repeated ResolveCategoryPopularityScoreContext context = 1;
+  // field_args provides the arguments for the resolver field popularityScore of type Category.
+  ResolveCategoryPopularityScoreArgs field_args = 2;
+}
+
+message ResolveCategoryPopularityScoreResult {
+  google.protobuf.Int32Value popularity_score = 1;
+}
+
+message ResolveCategoryPopularityScoreResponse {
+  repeated ResolveCategoryPopularityScoreResult result = 1;
+}
+
+message ResolveCategoryCategoryMetricsArgs {
+  string metric_type = 1;
+}
+
+message ResolveCategoryCategoryMetricsContext {
+  string id = 1;
+  string name = 2;
+}
+
+message ResolveCategoryCategoryMetricsRequest {
+  // context provides the resolver context for the field categoryMetrics of type Category.
+  repeated ResolveCategoryCategoryMetricsContext context = 1;
+  // field_args provides the arguments for the resolver field categoryMetrics of type Category.
+  ResolveCategoryCategoryMetricsArgs field_args = 2;
+}
+
+message ResolveCategoryCategoryMetricsResult {
+  CategoryMetrics category_metrics = 1;
+}
+
+message ResolveCategoryCategoryMetricsResponse {
+  repeated ResolveCategoryCategoryMetricsResult result = 1;
+}
+
+message ResolveCategoryMascotArgs {
+  bool include_volume = 1;
+}
+
+message ResolveCategoryMascotContext {
+  string id = 1;
+  CategoryKind kind = 2;
+}
+
+message ResolveCategoryMascotRequest {
+  // context provides the resolver context for the field mascot of type Category.
+  repeated ResolveCategoryMascotContext context = 1;
+  // field_args provides the arguments for the resolver field mascot of type Category.
+  ResolveCategoryMascotArgs field_args = 2;
+}
+
+message ResolveCategoryMascotResult {
+  Animal mascot = 1;
+}
+
+message ResolveCategoryMascotResponse {
+  repeated ResolveCategoryMascotResult result = 1;
+}
+
+message ResolveCategoryCategoryStatusArgs {
+  bool check_health = 1;
+}
+
+message ResolveCategoryCategoryStatusContext {
+  string id = 1;
+  string name = 2;
+}
+
+message ResolveCategoryCategoryStatusRequest {
+  // context provides the resolver context for the field categoryStatus of type Category.
+  repeated ResolveCategoryCategoryStatusContext context = 1;
+  // field_args provides the arguments for the resolver field categoryStatus of type Category.
+  ResolveCategoryCategoryStatusArgs field_args = 2;
+}
+
+message ResolveCategoryCategoryStatusResult {
+  ActionResult category_status = 1;
+}
+
+message ResolveCategoryCategoryStatusResponse {
+  repeated ResolveCategoryCategoryStatusResult result = 1;
+}
+
+message ResolveSubcategoryItemCountArgs {
+  SubcategoryItemFilter filters = 1;
+}
+
+message ResolveSubcategoryItemCountContext {
+  string id = 1;
+}
+
+message ResolveSubcategoryItemCountRequest {
+  // context provides the resolver context for the field itemCount of type Subcategory.
+  repeated ResolveSubcategoryItemCountContext context = 1;
+  // field_args provides the arguments for the resolver field itemCount of type Subcategory.
+  ResolveSubcategoryItemCountArgs field_args = 2;
+}
+
+message ResolveSubcategoryItemCountResult {
+  int32 item_count = 1;
+}
+
+message ResolveSubcategoryItemCountResponse {
+  repeated ResolveSubcategoryItemCountResult result = 1;
+}
+
+message ResolveCategoryMetricsNormalizedScoreArgs {
+  double baseline = 1;
+}
+
+message ResolveCategoryMetricsNormalizedScoreContext {
+  string id = 1;
+  string metricType = 2;
+  double value = 3;
+}
+
+message ResolveCategoryMetricsNormalizedScoreRequest {
+  // context provides the resolver context for the field normalizedScore of type CategoryMetrics.
+  repeated ResolveCategoryMetricsNormalizedScoreContext context = 1;
+  // field_args provides the arguments for the resolver field normalizedScore of type CategoryMetrics.
+  ResolveCategoryMetricsNormalizedScoreArgs field_args = 2;
+}
+
+message ResolveCategoryMetricsNormalizedScoreResult {
+  double normalized_score = 1;
+}
+
+message ResolveCategoryMetricsNormalizedScoreResponse {
+  repeated ResolveCategoryMetricsNormalizedScoreResult result = 1;
+}
+
+message ResolveTestContainerDetailsArgs {
+  bool include_extended = 1;
+}
+
+message ResolveTestContainerDetailsContext {
+  string id = 1;
+  string name = 2;
+}
+
+message ResolveTestContainerDetailsRequest {
+  // context provides the resolver context for the field details of type TestContainer.
+  repeated ResolveTestContainerDetailsContext context = 1;
+  // field_args provides the arguments for the resolver field details of type TestContainer.
+  ResolveTestContainerDetailsArgs field_args = 2;
+}
+
+message ResolveTestContainerDetailsResult {
+  TestDetails details = 1;
+}
+
+message ResolveTestContainerDetailsResponse {
+  repeated ResolveTestContainerDetailsResult result = 1;
 }
 
 message Product {
@@ -185,6 +977,12 @@ message Product {
 }
 
 message Storage {
+  string id = 1;
+  string name = 2;
+  string location = 3;
+}
+
+message Warehouse {
   string id = 1;
   string name = 2;
   string location = 3;
@@ -238,13 +1036,14 @@ message Order {
   string order_id = 1;
   string customer_name = 2;
   int32 total_items = 3;
-  repeated OrderLine order_lines = 4;
+  ListOfOrderLine order_lines = 4;
 }
 
 message Category {
   string id = 1;
   string name = 2;
   CategoryKind kind = 3;
+  ListOfSubcategory subcategories = 5;
 }
 
 message CategoryFilter {
@@ -259,8 +1058,158 @@ message Animal {
   }
 }
 
+message SearchInput {
+  string query = 1;
+  google.protobuf.Int32Value limit = 2;
+}
+
+message SearchResult {
+  oneof value {
+  Product product = 1;
+  User user = 2;
+  Category category = 3;
+  }
+}
+
+message NullableFieldsType {
+  string id = 1;
+  string name = 2;
+  google.protobuf.StringValue optional_string = 3;
+  google.protobuf.Int32Value optional_int = 4;
+  google.protobuf.DoubleValue optional_float = 5;
+  google.protobuf.BoolValue optional_boolean = 6;
+  string required_string = 7;
+  int32 required_int = 8;
+}
+
+message NullableFieldsFilter {
+  google.protobuf.StringValue name = 1;
+  google.protobuf.StringValue optional_string = 2;
+  google.protobuf.BoolValue include_nulls = 3;
+}
+
+message BlogPost {
+  string id = 1;
+  string title = 2;
+  string content = 3;
+  repeated string tags = 4;
+  ListOfString optional_tags = 5;
+  repeated string categories = 6;
+  ListOfString keywords = 7;
+  repeated int32 view_counts = 8;
+  ListOfFloat ratings = 9;
+  ListOfBoolean is_published = 10;
+  ListOfListOfString tag_groups = 11;
+  ListOfListOfString related_topics = 12;
+  ListOfListOfString comment_threads = 13;
+  ListOfListOfString suggestions = 14;
+  repeated Category related_categories = 15;
+  repeated User contributors = 16;
+  ListOfProduct mentioned_products = 17;
+  ListOfUser mentioned_users = 18;
+  ListOfListOfCategory category_groups = 19;
+  ListOfListOfUser contributor_teams = 20;
+}
+
+message BlogPostFilter {
+  google.protobuf.StringValue title = 1;
+  google.protobuf.BoolValue has_categories = 2;
+  google.protobuf.Int32Value min_tags = 3;
+}
+
+message Author {
+  string id = 1;
+  string name = 2;
+  google.protobuf.StringValue email = 3;
+  repeated string skills = 4;
+  repeated string languages = 5;
+  ListOfString social_links = 6;
+  ListOfListOfString teams_by_project = 7;
+  ListOfListOfString collaborations = 8;
+  ListOfBlogPost written_posts = 9;
+  repeated Category favorite_categories = 10;
+  ListOfUser related_authors = 11;
+  ListOfProduct product_reviews = 12;
+  ListOfListOfUser author_groups = 13;
+  ListOfListOfCategory category_preferences = 14;
+  ListOfListOfUser project_teams = 15;
+}
+
+message AuthorFilter {
+  google.protobuf.StringValue name = 1;
+  google.protobuf.BoolValue has_teams = 2;
+  google.protobuf.Int32Value skill_count = 3;
+}
+
+message TestContainer {
+  string id = 1;
+  string name = 2;
+  google.protobuf.StringValue description = 3;
+}
+
 message UserInput {
   string name = 1;
+}
+
+message ActionInput {
+  string type = 1;
+  string payload = 2;
+}
+
+message ActionResult {
+  oneof value {
+  ActionSuccess action_success = 1;
+  ActionError action_error = 2;
+  }
+}
+
+message NullableFieldsInput {
+  string name = 1;
+  google.protobuf.StringValue optional_string = 2;
+  google.protobuf.Int32Value optional_int = 3;
+  google.protobuf.DoubleValue optional_float = 4;
+  google.protobuf.BoolValue optional_boolean = 5;
+  string required_string = 6;
+  int32 required_int = 7;
+}
+
+message BlogPostInput {
+  string title = 1;
+  string content = 2;
+  repeated string tags = 3;
+  ListOfString optional_tags = 4;
+  repeated string categories = 5;
+  ListOfString keywords = 6;
+  repeated int32 view_counts = 7;
+  ListOfFloat ratings = 8;
+  ListOfBoolean is_published = 9;
+  ListOfListOfString tag_groups = 10;
+  ListOfListOfString related_topics = 11;
+  ListOfListOfString comment_threads = 12;
+  ListOfListOfString suggestions = 13;
+  ListOfCategoryInput related_categories = 14;
+  ListOfUserInput contributors = 15;
+  ListOfListOfCategoryInput category_groups = 16;
+}
+
+message AuthorInput {
+  string name = 1;
+  google.protobuf.StringValue email = 2;
+  repeated string skills = 3;
+  repeated string languages = 4;
+  ListOfString social_links = 5;
+  ListOfListOfString teams_by_project = 6;
+  ListOfListOfString collaborations = 7;
+  repeated CategoryInput favorite_categories = 8;
+  ListOfListOfUserInput author_groups = 9;
+  ListOfListOfUserInput project_teams = 10;
+}
+
+message ProductDetails {
+  string id = 1;
+  string description = 2;
+  ActionResult review_summary = 3;
+  Animal recommended_pet = 4;
 }
 
 message NestedTypeB {
@@ -289,13 +1238,29 @@ message Pagination {
 message OrderLineInput {
   string product_id = 1;
   int32 quantity = 2;
-  repeated string modifiers = 3;
+  ListOfString modifiers = 3;
 }
 
 message OrderLine {
   string product_id = 1;
   int32 quantity = 2;
-  repeated string modifiers = 3;
+  ListOfString modifiers = 3;
+}
+
+message Subcategory {
+  string id = 1;
+  string name = 2;
+  google.protobuf.StringValue description = 3;
+  bool is_active = 4;
+}
+
+message CategoryMetrics {
+  string id = 1;
+  string metric_type = 2;
+  double value = 3;
+  string timestamp = 4;
+  string category_id = 5;
+  Category related_category = 6;
 }
 
 enum CategoryKind {
@@ -311,6 +1276,8 @@ message Cat {
   string name = 2;
   string kind = 3;
   int32 meow_volume = 4;
+  Owner owner = 5;
+  CatBreed breed = 6;
 }
 
 message Dog {
@@ -318,4 +1285,95 @@ message Dog {
   string name = 2;
   string kind = 3;
   int32 bark_volume = 4;
+  Owner owner = 5;
+  DogBreed breed = 6;
+}
+
+message Owner {
+  string id = 1;
+  string name = 2;
+  ContactInfo contact = 3;
+}
+
+message ContactInfo {
+  string email = 1;
+  string phone = 2;
+  Address address = 3;
+}
+
+message Address {
+  string street = 1;
+  string city = 2;
+  string country = 3;
+  string zip_code = 4;
+}
+
+message CatBreed {
+  string id = 1;
+  string name = 2;
+  string origin = 3;
+  BreedCharacteristics characteristics = 4;
+}
+
+message DogBreed {
+  string id = 1;
+  string name = 2;
+  string origin = 3;
+  BreedCharacteristics characteristics = 4;
+}
+
+message BreedCharacteristics {
+  string size = 1;
+  string temperament = 2;
+  string lifespan = 3;
+}
+
+message ActionSuccess {
+  string message = 1;
+  string timestamp = 2;
+}
+
+message ActionError {
+  string message = 1;
+  string code = 2;
+}
+
+message TestDetails {
+  string id = 1;
+  string summary = 2;
+  Animal pet = 3;
+  ActionResult status = 4;
+}
+
+message CategoryInput {
+  string name = 1;
+  CategoryKind kind = 2;
+}
+
+message ProductCountFilter {
+  google.protobuf.DoubleValue min_price = 1;
+  google.protobuf.DoubleValue max_price = 2;
+  google.protobuf.BoolValue in_stock = 3;
+  google.protobuf.StringValue search_term = 4;
+}
+
+message SubcategoryItemFilter {
+  google.protobuf.DoubleValue min_price = 1;
+  google.protobuf.DoubleValue max_price = 2;
+  google.protobuf.BoolValue in_stock = 3;
+  google.protobuf.BoolValue is_active = 4;
+  google.protobuf.StringValue search_term = 5;
+}
+
+enum ShippingDestination {
+  SHIPPING_DESTINATION_UNSPECIFIED = 0;
+  SHIPPING_DESTINATION_DOMESTIC = 1;
+  SHIPPING_DESTINATION_EXPRESS = 2;
+  SHIPPING_DESTINATION_INTERNATIONAL = 3;
+}
+
+message ShippingEstimateInput {
+  ShippingDestination destination = 1;
+  double weight = 2;
+  google.protobuf.BoolValue expedited = 3;
 }

@@ -17,7 +17,7 @@ type PathBuilder struct {
 }
 
 func NewPathBuilder(config *Configuration) *PathBuilder {
-	walker := astvisitor.NewWalker(48)
+	walker := astvisitor.NewWalkerWithID(48, "PathBuilderWalker")
 	visitor := &pathBuilderVisitor{
 		walker:              &walker,
 		fieldConfigurations: config.Fields,
@@ -64,7 +64,7 @@ func (p *PathBuilder) CreatePlanningPaths(operation, definition *ast.Document, r
 		return nil
 	}
 	// we have to populate missing paths after the walk
-	p.visitor.populateMissingPahts()
+	p.visitor.populateMissingPaths()
 
 	// walk ends in 2 cases:
 	// - we have finished visiting document
@@ -86,7 +86,7 @@ func (p *PathBuilder) CreatePlanningPaths(operation, definition *ast.Document, r
 			return nil
 		}
 		// we have to populate missing paths after the walk
-		p.visitor.populateMissingPahts()
+		p.visitor.populateMissingPaths()
 
 		if p.config.Debug.PrintPlanningPaths {
 			debugMessage(fmt.Sprintf("Create planning paths run #%d", i))
@@ -158,7 +158,11 @@ func (p *PathBuilder) printPlanningPaths() {
 		if requiredFields != nil && len(*requiredFields) > 0 {
 			fmt.Println("Required fields:")
 			for _, field := range *requiredFields {
-				fmt.Println(field)
+				if field.FieldName != "" {
+					fmt.Printf("required by %s: %s\n", field.FieldName, field)
+					continue
+				}
+				fmt.Println("key:", field)
 			}
 		}
 		fmt.Println("Paths:")

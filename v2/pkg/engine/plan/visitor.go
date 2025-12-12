@@ -2,6 +2,7 @@ package plan
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -28,6 +29,7 @@ type QueryPlanProvider interface {
 	IncludeQueryPlanInFetchConfiguration()
 }
 
+// Visitor creates the shape of resolve.GraphQLResponse.
 type Visitor struct {
 	Operation, Definition        *ast.Document
 	Walker                       *astvisitor.Walker
@@ -43,6 +45,9 @@ type Visitor struct {
 	currentField                 *resolve.Field
 	planners                     []PlannerConfiguration
 	skipFieldsRefs               []int
+	fieldRefDependsOnFieldRefs   map[int][]int
+	fieldDependencyKind          map[fieldDependencyKey]fieldDependencyKind
+	fieldRefDependants           map[int][]int // inverse of fieldRefDependsOnFieldRefs
 	fieldConfigs                 map[int]*FieldConfiguration
 	exportedVariables            map[string]struct{}
 	skipIncludeOnFragments       map[int]skipIncludeInfo
@@ -50,6 +55,15 @@ type Visitor struct {
 	includeQueryPlans            bool
 	indirectInterfaceFields      map[int]indirectInterfaceField
 	pathCache                    map[astvisitor.VisitorKind]map[int]string
+
+	// plannerFields maps plannerID to fieldRefs planned on this planner.
+	plannerFields map[int][]int
+
+	// fieldPlanners maps fieldRef to the plannerIDs where it was planned on.
+	fieldPlanners map[int][]int
+
+	// fieldEnclosingTypeNames maps fieldRef to the enclosing type name.
+	fieldEnclosingTypeNames map[int]string
 }
 
 type indirectInterfaceField struct {
@@ -191,6 +205,24 @@ func (v *Visitor) AllowVisitor(kind astvisitor.VisitorKind, ref int, visitor any
 			}
 		}
 
+		if !v.Config.DisableIncludeFieldDependencies && kind == astvisitor.LeaveField {
+			// we don't need to do this twice, so we only do it on leave
+
+			// store which fields are planned on which planners
+			if v.plannerFields[visitorID] == nil {
+				v.plannerFields[visitorID] = []int{ref}
+			} else {
+				v.plannerFields[visitorID] = append(v.plannerFields[visitorID], ref)
+			}
+
+			// store which planners a field was planned on
+			if v.fieldPlanners[ref] == nil {
+				v.fieldPlanners[ref] = []int{visitorID}
+			} else {
+				v.fieldPlanners[ref] = append(v.fieldPlanners[ref], visitorID)
+			}
+		}
+
 		return shouldWalkFieldsOnPath
 	case astvisitor.EnterInlineFragment, astvisitor.LeaveInlineFragment:
 		// we allow visiting inline fragments only if particular planner has path for the fragment
@@ -308,6 +340,9 @@ func (v *Visitor) LeaveSelectionSet(ref int) {
 func (v *Visitor) EnterField(ref int) {
 	v.debugOnEnterNode(ast.NodeKindField, ref)
 
+	if !v.Config.DisableIncludeFieldDependencies {
+		v.fieldEnclosingTypeNames[ref] = strings.Clone(v.Walker.EnclosingTypeDefinition.NameString(v.Definition))
+	}
 	// check if we have to skip the field in the response
 	// it means it was requested by the planner not the user
 	if v.skipField(ref) {
@@ -356,7 +391,7 @@ func (v *Visitor) EnterField(ref int) {
 			v.currentField.Value = str
 		}
 	} else {
-		path := v.resolveFieldPath(ref)
+		path := []string{v.Operation.FieldAliasOrNameString(ref)}
 		v.currentField.Value = v.resolveFieldValue(ref, fieldDefinitionTypeRef, true, path)
 	}
 
@@ -599,7 +634,11 @@ func (v *Visitor) LeaveField(ref int) {
 	}
 }
 
+// skipField returns true if the field was added by the query planner as a dependency.
+// For another field and should not be included in the response.
+// If it returns false, the user requests the field.
 func (v *Visitor) skipField(ref int) bool {
+	// TODO: If this grows, switch to map[int]struct{} for O(1).
 	for _, skipRef := range v.skipFieldsRefs {
 		if skipRef == ref {
 			return true
@@ -981,6 +1020,7 @@ func (v *Visitor) EnterOperationDefinition(ref int) {
 	}
 }
 
+// TODO: cleanup - field alias override logic is disabled
 func (v *Visitor) resolveFieldPath(ref int) []string {
 	typeName := v.Walker.EnclosingTypeDefinition.NameString(v.Definition)
 	fieldName := v.Operation.FieldNameUnsafeString(ref)
@@ -988,7 +1028,8 @@ func (v *Visitor) resolveFieldPath(ref int) []string {
 
 	aliasOverride := false
 	if plannerConfig != nil && plannerConfig.Planner() != nil {
-		aliasOverride = plannerConfig.DataSourcePlanningBehavior().OverrideFieldPathFromAlias
+		behavior := plannerConfig.DataSourceConfiguration().PlanningBehavior()
+		aliasOverride = behavior.OverrideFieldPathFromAlias
 	}
 
 	for i := range v.Config.Fields {
@@ -1026,6 +1067,9 @@ func (v *Visitor) EnterDocument(operation, definition *ast.Document) {
 	v.skipIncludeOnFragments = map[int]skipIncludeInfo{}
 	v.indirectInterfaceFields = map[int]indirectInterfaceField{}
 	v.pathCache = map[astvisitor.VisitorKind]map[int]string{}
+	v.plannerFields = map[int][]int{}
+	v.fieldPlanners = map[int][]int{}
+	v.fieldEnclosingTypeNames = map[int]string{}
 }
 
 func (v *Visitor) LeaveDocument(_, _ *ast.Document) {
@@ -1244,6 +1288,7 @@ func (v *Visitor) configureSubscription(config *objectFetchConfiguration) {
 	v.subscription.Trigger.Variables = subscription.Variables
 	v.subscription.Trigger.Source = subscription.DataSource
 	v.subscription.Trigger.PostProcessing = subscription.PostProcessing
+	v.subscription.Trigger.QueryPlan = subscription.QueryPlan
 	v.resolveInputTemplates(config, &subscription.Input, &v.subscription.Trigger.Variables)
 	v.subscription.Trigger.Input = []byte(subscription.Input)
 	v.subscription.Filter = config.filter
@@ -1251,7 +1296,7 @@ func (v *Visitor) configureSubscription(config *objectFetchConfiguration) {
 
 func (v *Visitor) configureObjectFetch(config *objectFetchConfiguration) {
 	fetchConfig := config.planner.ConfigureFetch()
-	// If the datasource is missing, we can anticipate that configure fetch failed
+	// If the datasource is missing, we can expect that configure fetch failed
 	if fetchConfig.DataSource == nil {
 		return
 	}
@@ -1281,15 +1326,302 @@ func (v *Visitor) configureFetch(internal *objectFetchConfiguration, external re
 		DataSourceIdentifier: []byte(dataSourceType),
 	}
 
-	if !v.Config.DisableIncludeInfo {
-		singleFetch.Info = &resolve.FetchInfo{
-			DataSourceID:   internal.sourceID,
-			DataSourceName: internal.sourceName,
-			RootFields:     internal.rootFields,
-			OperationType:  internal.operationType,
-			QueryPlan:      external.QueryPlan,
+	if v.Config.DisableIncludeInfo {
+		return singleFetch
+	}
+	singleFetch.Info = &resolve.FetchInfo{
+		DataSourceID:   internal.sourceID,
+		DataSourceName: internal.sourceName,
+		RootFields:     internal.rootFields,
+		OperationType:  internal.operationType,
+		QueryPlan:      external.QueryPlan,
+	}
+
+	if v.Config.DisableIncludeFieldDependencies {
+		return singleFetch
+	}
+	singleFetch.Info.CoordinateDependencies = v.buildFetchDependencies(internal.fetchID)
+
+	if !v.Config.BuildFetchReasons {
+		return singleFetch
+	}
+	singleFetch.Info.FetchReasons = v.buildFetchReasons(internal.fetchID)
+	if len(singleFetch.Info.FetchReasons) == 0 {
+		return singleFetch
+	}
+	singleFetch.Info.PropagatedFetchReasons = v.getPropagatedReasons(internal.fetchID, singleFetch.Info.FetchReasons)
+	return singleFetch
+}
+
+// buildFetchDependencies builds and returns fetch dependencies for the specified fetch ID.
+func (v *Visitor) buildFetchDependencies(fetchID int) []resolve.FetchDependency {
+	fields, ok := v.plannerFields[fetchID]
+	if !ok {
+		return nil
+	}
+	dependencies := make([]resolve.FetchDependency, 0, len(fields))
+	for _, fieldRef := range fields {
+		userRequestedField := !v.skipField(fieldRef)
+		deps, ok := v.fieldRefDependsOnFieldRefs[fieldRef]
+		if !ok {
+			continue
+		}
+		dependency := resolve.FetchDependency{
+			Coordinate: resolve.GraphCoordinate{
+				FieldName: v.Operation.FieldNameString(fieldRef),
+				TypeName:  v.fieldEnclosingTypeNames[fieldRef],
+			},
+			IsUserRequested: userRequestedField,
+		}
+		for _, depFieldRef := range deps {
+			depFieldPlanners, ok := v.fieldPlanners[depFieldRef]
+			if !ok {
+				continue
+			}
+			for _, fetchID := range depFieldPlanners { // planner index == fetchID
+				ofc := v.planners[fetchID].ObjectFetchConfiguration()
+				if ofc == nil {
+					continue
+				}
+				origin := resolve.FetchDependencyOrigin{
+					FetchID:  fetchID,
+					Subgraph: ofc.sourceName,
+					Coordinate: resolve.GraphCoordinate{
+						FieldName: v.Operation.FieldNameString(depFieldRef),
+						TypeName:  v.fieldEnclosingTypeNames[depFieldRef],
+					},
+				}
+				dependencyKind, ok := v.fieldDependencyKind[fieldDependencyKey{field: fieldRef, dependsOn: depFieldRef}]
+				if !ok {
+					continue
+				}
+				switch dependencyKind {
+				case fieldDependencyKindKey:
+					origin.IsKey = true
+				case fieldDependencyKindRequires:
+					origin.IsRequires = true
+				}
+				dependency.DependsOn = append(dependency.DependsOn, origin)
+			}
+		}
+		dependencies = append(dependencies, dependency)
+	}
+	return dependencies
+}
+
+// buildFetchReasons constructs a list of FetchReason for a given fetchID. This list contains
+// all the fields that depend on the fields in the fetchID.
+// It ensures deduplication, sorts the results, and aggregates information about field requests.
+func (v *Visitor) buildFetchReasons(fetchID int) []resolve.FetchReason {
+	fields, ok := v.plannerFields[fetchID]
+	if !ok {
+		return nil
+	}
+
+	reasons := make([]resolve.FetchReason, 0, len(fields))
+	// index maps field coordinates to the position in the reason slice
+	index := make(map[FieldCoordinate]int, len(fields))
+
+	for _, fieldRef := range fields {
+		fieldName := v.Operation.FieldNameString(fieldRef)
+		if fieldName == "__typename" {
+			continue
+		}
+		typeName := v.fieldEnclosingTypeNames[fieldRef]
+
+		byUser := !v.skipField(fieldRef)
+
+		var nullable bool
+		fieldDefRef := v.fieldDefinitionRef(typeName, fieldName)
+		if fieldDefRef != ast.InvalidRef {
+			typeRef := v.Definition.FieldDefinitionType(fieldDefRef)
+			nullable = !v.Definition.TypeIsNonNull(typeRef)
+		}
+
+		var subgraphs []string
+		var isKey, isRequires bool
+
+		if dependants, ok := v.fieldRefDependants[fieldRef]; ok {
+			subgraphs = make([]string, 0, len(dependants))
+			for _, reqByRef := range dependants {
+				plannerIDs, ok := v.fieldPlanners[reqByRef]
+				if !ok {
+					continue
+				}
+
+				// Find the subgraph's names that are responsible for reqByRef.
+				for _, plannerID := range plannerIDs {
+					ofc := v.planners[plannerID].ObjectFetchConfiguration()
+					if ofc == nil {
+						continue
+					}
+					subgraphs = append(subgraphs, ofc.sourceName)
+
+					depKind, ok := v.fieldDependencyKind[fieldDependencyKey{field: reqByRef, dependsOn: fieldRef}]
+					if !ok {
+						continue
+					}
+					switch depKind {
+					case fieldDependencyKindKey:
+						isKey = true
+					case fieldDependencyKindRequires:
+						isRequires = true
+					}
+				}
+			}
+		}
+
+		// Deduplicate using the index and merge with existing entries.
+		if byUser || len(subgraphs) > 0 {
+			key := FieldCoordinate{TypeName: typeName, FieldName: fieldName}
+			var i int
+			if i, ok = index[key]; ok {
+				// True should overwrite false.
+				reasons[i].ByUser = reasons[i].ByUser || byUser
+				if len(subgraphs) > 0 {
+					reasons[i].BySubgraphs = append(reasons[i].BySubgraphs, subgraphs...)
+					reasons[i].IsKey = reasons[i].IsKey || isKey
+					reasons[i].IsRequires = reasons[i].IsRequires || isRequires
+				}
+			} else {
+				reasons = append(reasons, resolve.FetchReason{
+					TypeName:    typeName,
+					FieldName:   fieldName,
+					BySubgraphs: subgraphs,
+					ByUser:      byUser,
+					IsKey:       isKey,
+					IsRequires:  isRequires,
+					Nullable:    nullable,
+				})
+				i = len(reasons) - 1
+				index[key] = i
+			}
+			if reasons[i].BySubgraphs != nil {
+				slices.Sort(reasons[i].BySubgraphs)
+				reasons[i].BySubgraphs = slices.Compact(reasons[i].BySubgraphs)
+			}
 		}
 	}
 
-	return singleFetch
+	slices.SortFunc(reasons, cmpFetchReasons)
+	return reasons
+}
+
+func cmpFetchReasons(a, b resolve.FetchReason) int {
+	return cmp.Or(
+		cmp.Compare(a.TypeName, b.TypeName),
+		cmp.Compare(a.FieldName, b.FieldName),
+	)
+}
+
+// fieldDefinitionRef returns the definition reference of a field in a given type or ast.InvalidRef if not found.
+func (v *Visitor) fieldDefinitionRef(typeName string, fieldName string) int {
+	node, ok := v.Definition.NodeByNameStr(typeName)
+	if !ok {
+		return ast.InvalidRef
+	}
+	defRef, ok := v.Definition.NodeFieldDefinitionByName(node, []byte(fieldName))
+	if !ok {
+		return ast.InvalidRef
+	}
+	return defRef
+}
+
+// getPropagatedReasons collects fetch reasons required by the data source. Only fields
+// marked by a special directive are used for propagation (returned by RequireFetchReasons).
+//
+// Additionally, interfaces were taken care of. When an interface field is marked,
+// and a user requests that field in an operation, then fetch reasons for this field will be
+// extended with fetch reasons for all the implementing types.
+// In general, a marked interface field leads to all implementation's fields being used for propagation.
+//
+// This method returns deduplicated and sorted results.
+func (v *Visitor) getPropagatedReasons(fetchID int, fetchReasons []resolve.FetchReason) []resolve.FetchReason {
+	dsConfig := v.planners[fetchID].DataSourceConfiguration()
+	// We should propagate fetch reasons for the coordinates in the lookup map.
+	lookup := dsConfig.RequireFetchReasons()
+	propagated := make([]resolve.FetchReason, 0, len(lookup))
+	// index maps field coordinates to the position in the propagated slice
+	index := make(map[FieldCoordinate]int, len(lookup))
+
+	// appendOrMerge deduplicates and merges fetch reasons with the same
+	// (TypeName, FieldName) coordinate.
+	// This is necessary because:
+	//  1. When both interface and implementing type fields are in fetchReasons, we can add the same
+	//  implementing type field twice (once from the interface, once from the implementing type itself).
+	//  2. Different entries might have different ByUser, BySubgraphs values that
+	//  need to be merged (similar to buildFetchReasons).
+	appendOrMerge := func(key FieldCoordinate, reason resolve.FetchReason) {
+		if i, ok := index[key]; ok {
+			propagated[i].ByUser = propagated[i].ByUser || reason.ByUser
+			if len(reason.BySubgraphs) > 0 {
+				propagated[i].BySubgraphs = append(propagated[i].BySubgraphs, reason.BySubgraphs...)
+				slices.Sort(propagated[i].BySubgraphs)
+				propagated[i].BySubgraphs = slices.Compact(propagated[i].BySubgraphs)
+				propagated[i].IsKey = propagated[i].IsKey || reason.IsKey
+				propagated[i].IsRequires = propagated[i].IsRequires || reason.IsRequires
+			}
+		} else {
+			propagated = append(propagated, reason)
+			index[key] = len(propagated) - 1
+		}
+	}
+
+	for _, reason := range fetchReasons {
+		field := FieldCoordinate{reason.TypeName, reason.FieldName}
+		_, fieldInLookup := lookup[field]
+		if fieldInLookup {
+			appendOrMerge(field, reason)
+		}
+
+		typeNode, exists := v.Definition.NodeByNameStr(reason.TypeName)
+		if !exists {
+			continue
+		}
+
+		// Special case when the field belongs to an object, and this field is not in the lookup.
+		// If this object implements an interface that has a corresponding field in the lookup,
+		// then propagate it.
+		if typeNode.Kind == ast.NodeKindObjectTypeDefinition && !fieldInLookup {
+			objectDef := v.Definition.ObjectTypeDefinitions[typeNode.Ref]
+			for _, interfaceTypeRef := range objectDef.ImplementsInterfaces.Refs {
+				interfaceTypeName := v.Definition.ResolveTypeNameString(interfaceTypeRef)
+				interfaceField := FieldCoordinate{interfaceTypeName, reason.FieldName}
+				if _, ok := lookup[interfaceField]; ok {
+					appendOrMerge(field, reason)
+					break
+				}
+			}
+			continue
+		}
+
+		// Special case when the field belongs to an interface type.
+		if typeNode.Kind != ast.NodeKindInterfaceTypeDefinition {
+			continue
+		}
+		implementingTypeNames, ok := v.Definition.InterfaceTypeDefinitionImplementedByObjectWithNames(typeNode.Ref)
+		if !ok {
+			continue
+		}
+		for _, implementingTypeName := range implementingTypeNames {
+			implementingField := FieldCoordinate{implementingTypeName, reason.FieldName}
+			_, implementingInLookup := lookup[implementingField]
+			// 1st case: interface field in the lookup;
+			// all the implementing fields should be propagated.
+			//
+			// 2nd case: interface field is not in the lookup, but the implementing field is;
+			// only the implementing fields found in the lookup should be propagated.
+			if fieldInLookup || implementingInLookup {
+				reasonClone := reason
+				reasonClone.TypeName = implementingTypeName
+				if len(reasonClone.BySubgraphs) > 0 {
+					reasonClone.BySubgraphs = slices.Clone(reasonClone.BySubgraphs)
+				}
+				appendOrMerge(implementingField, reasonClone)
+			}
+		}
+	}
+
+	slices.SortFunc(propagated, cmpFetchReasons)
+	return propagated
 }

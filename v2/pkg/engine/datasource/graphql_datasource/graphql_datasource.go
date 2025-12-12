@@ -51,6 +51,7 @@ var (
 	}
 )
 
+// Planner creates the subgraph operation.
 type Planner[T Configuration] struct {
 	id                                   int
 	debug                                bool
@@ -78,6 +79,10 @@ type Planner[T Configuration] struct {
 	insideCustomScalarField            bool
 	customScalarFieldRef               int
 	parentTypeNodes                    []ast.Node
+
+	// propagatedOperationName is non-empty when the operation name is propagated
+	// to the downstream subgraph fetch.
+	propagatedOperationName string
 
 	// federation
 
@@ -264,14 +269,6 @@ func (p *Planner[T]) DownstreamResponseFieldAlias(downstreamFieldRef int) (alias
 	return "", false
 }
 
-func (p *Planner[T]) DataSourcePlanningBehavior() plan.DataSourcePlanningBehavior {
-	return plan.DataSourcePlanningBehavior{
-		MergeAliasedRootNodes:      true,
-		OverrideFieldPathFromAlias: true,
-		IncludeTypeNameFields:      true,
-	}
-}
-
 func (p *Planner[T]) Register(visitor *plan.Visitor, configuration plan.DataSourceConfiguration[T], dataSourcePlannerConfiguration plan.DataSourcePlannerConfiguration) error {
 
 	p.visitor = visitor
@@ -363,11 +360,12 @@ func (p *Planner[T]) ConfigureFetch() resolve.FetchConfiguration {
 		}
 
 		dataSource, err = grpcdatasource.NewDataSource(p.grpcClient, grpcdatasource.DataSourceConfig{
-			Operation:  &opDocument,
-			Definition: p.config.schemaConfiguration.upstreamSchemaAst,
-			Mapping:    p.config.grpc.Mapping,
-			Compiler:   p.config.grpc.Compiler,
-			Disabled:   p.config.grpc.Disabled,
+			Operation:         &opDocument,
+			Definition:        p.config.schemaConfiguration.upstreamSchemaAst,
+			Mapping:           p.config.grpc.Mapping,
+			Compiler:          p.config.grpc.Compiler,
+			Disabled:          p.config.grpc.Disabled,
+			FederationConfigs: p.dataSourcePlannerConfig.RequiredFields,
 			// TODO: remove fallback logic in visitor for subgraph name and
 			// add proper error handling if the subgraph name is not set in the mapping
 			SubgraphName: p.dataSourceConfig.Name(),
@@ -387,6 +385,7 @@ func (p *Planner[T]) ConfigureFetch() resolve.FetchConfiguration {
 		PostProcessing:                        postProcessing,
 		SetTemplateOutputToNullOnVariableNull: requiresEntityFetch || requiresEntityBatchFetch,
 		QueryPlan:                             p.queryPlan,
+		OperationName:                         p.propagatedOperationName,
 	}
 }
 
@@ -450,7 +449,8 @@ func (p *Planner[T]) ConfigureSubscription() plan.SubscriptionConfiguration {
 	return plan.SubscriptionConfiguration{
 		Input: string(input),
 		DataSource: &SubscriptionSource{
-			client: p.subscriptionClient,
+			client:                 p.subscriptionClient,
+			subscriptionOnStartFns: p.config.subscription.StartupHooks,
 		},
 		Variables:      p.variables,
 		PostProcessing: DefaultPostProcessingConfiguration,
@@ -524,6 +524,7 @@ func (p *Planner[T]) EnterOperationDefinition(ref int) {
 
 	if p.dataSourcePlannerConfig.Options.EnableOperationNamePropagation {
 		operation := p.buildUpstreamOperationName(ref)
+		p.propagatedOperationName = operation
 		if operation != "" {
 			p.upstreamOperation.OperationDefinitions[definition.Ref].Name = p.upstreamOperation.Input.AppendInputString(operation)
 		}
@@ -809,6 +810,7 @@ func (p *Planner[T]) EnterDocument(_, _ *ast.Document) {
 	p.variables = p.variables[:0]
 	p.hasFederationRoot = false
 	p.queryPlan = nil
+	p.propagatedOperationName = ""
 
 	// reset information about root type
 	p.rootTypeName = ""
@@ -911,7 +913,7 @@ func (p *Planner[T]) fieldDefinition(fieldName, typeName string) *ast.FieldDefin
 func (p *Planner[T]) isOnTypeInlineFragmentAllowed() bool {
 	p.DebugPrint("isOnTypeInlineFragmentAllowed")
 
-	if !(len(p.nodes) > 1 && p.nodes[len(p.nodes)-1].Kind == ast.NodeKindSelectionSet) {
+	if len(p.nodes) <= 1 || p.nodes[len(p.nodes)-1].Kind != ast.NodeKindSelectionSet {
 		return true
 	}
 
@@ -925,7 +927,7 @@ func (p *Planner[T]) isOnTypeInlineFragmentAllowed() bool {
 }
 
 func (p *Planner[T]) isInEntitiesSelectionSet() bool {
-	if !(len(p.nodes) > 2) {
+	if len(p.nodes) <= 2 {
 		return false
 	}
 
@@ -1371,7 +1373,7 @@ func (p *Planner[T]) debugPrintQueryPlan(operation *ast.Document) {
 	if p.hasFederationRoot && p.dataSourcePlannerConfig.HasRequiredFields() { // IsRepresentationsQuery
 		args = append(args, "Representations:\n")
 		for _, cfg := range p.dataSourcePlannerConfig.RequiredFields {
-			key, report := plan.RequiredFieldsFragment(cfg.TypeName, cfg.SelectionSet, cfg.FieldName == "")
+			key, report := plan.QueryPlanRequiredFieldsFragment(cfg.TypeName, cfg.FieldName, cfg.SelectionSet)
 			if report.HasErrors() {
 				continue
 			}
@@ -1406,7 +1408,7 @@ func (p *Planner[T]) generateQueryPlansForFetchConfiguration(operation *ast.Docu
 	if p.hasFederationRoot && p.dataSourcePlannerConfig.HasRequiredFields() { // IsRepresentationsQuery
 		representations = make([]resolve.Representation, len(p.dataSourcePlannerConfig.RequiredFields))
 		for i, cfg := range p.dataSourcePlannerConfig.RequiredFields {
-			fragmentAst, report := plan.QueryPlanRequiredFieldsFragment(cfg.FieldName, cfg.TypeName, cfg.SelectionSet)
+			fragmentAst, report := plan.QueryPlanRequiredFieldsFragment(cfg.TypeName, cfg.FieldName, cfg.SelectionSet)
 			if report.HasErrors() {
 				p.stopWithError(errors.WithStack(fmt.Errorf("generateQueryPlansForFetchConfiguration: failed to build fragment for required fields: %w", report)))
 				return
@@ -1435,7 +1437,8 @@ func (p *Planner[T]) generateQueryPlansForFetchConfiguration(operation *ast.Docu
 	}
 }
 
-// printOperation - prints normalized upstream operation
+// printOperation returns normalized and validated upstream operation, optionally minified.
+// Errors encountered during processing terminate the operation, and nils are returned.
 func (p *Planner[T]) printOperation() (operationBytes []byte, variablesBytes []byte) {
 
 	kit := p.getKit()
@@ -1444,18 +1447,18 @@ func (p *Planner[T]) printOperation() (operationBytes []byte, variablesBytes []b
 	// create empty operation and definition documents
 	definition, err := p.config.UpstreamSchema()
 	if err != nil {
-		p.stopWithError(errors.WithStack(fmt.Errorf("printOperation: failed to read upstream schema: %w", err)))
+		p.stopWithError(errors.WithStack(fmt.Errorf("printOperation planner id: %d: failed to read upstream schema: %w", p.id, err)))
 		return nil, nil
 	}
 
-	// When datasource is nested and definition query type do not contain operation field
-	// we have to replace a query type with a current root type
+	// When datasource is nested and definition's query type does not contain operation field
+	// we have to replace a query type with a current root type.
 	p.replaceQueryType(definition)
 
 	// normalize upstream operation
 	kit.normalizer.NormalizeOperation(p.upstreamOperation, definition, kit.report)
 	if kit.report.HasErrors() {
-		p.stopWithError(errors.WithStack(fmt.Errorf("printOperation: normalization failed: %w", kit.report)))
+		p.stopWithError(errors.WithStack(fmt.Errorf("printOperation planner id: %d: normalization failed: %w", p.id, kit.report)))
 		return nil, nil
 	}
 
@@ -1466,7 +1469,7 @@ func (p *Planner[T]) printOperation() (operationBytes []byte, variablesBytes []b
 
 	kit.validator.Validate(p.upstreamOperation, definition, kit.report)
 	if kit.report.HasErrors() {
-		p.stopWithError(errors.WithStack(fmt.Errorf("printOperation: validation failed: %w", kit.report)))
+		p.stopWithError(errors.WithStack(fmt.Errorf("printOperation planner id: %d: validation failed: %w", p.id, kit.report)))
 		return nil, nil
 	}
 
@@ -1476,21 +1479,22 @@ func (p *Planner[T]) printOperation() (operationBytes []byte, variablesBytes []b
 	// print upstream operation
 	err = kit.printer.Print(p.upstreamOperation, kit.buf)
 	if err != nil {
-		p.stopWithError(errors.WithStack(fmt.Errorf("printOperation: failed to print: %w", err)))
+		p.stopWithError(errors.WithStack(fmt.Errorf("printOperation planner id: %d: failed to print: %w", p.id, err)))
 		return nil, nil
 	}
 
 	rawOperationBytes := make([]byte, kit.buf.Len())
 	copy(rawOperationBytes, kit.buf.Bytes())
 
-	if p.minifier != nil && len(rawOperationBytes) > 140 {
+	// gRPC DataSource requires minification to be disabled.
+	if p.minifier != nil && !p.config.IsGRPC() && len(rawOperationBytes) > 140 {
 		kit.buf.Reset()
 		madeReplacements, err := p.minifier.Minify(rawOperationBytes, definition, astminify.MinifyOptions{
 			SortAST: true,
 			Pretty:  false,
 		}, kit.buf)
 		if err != nil {
-			p.stopWithError(errors.WithStack(fmt.Errorf("printOperation: failed to minify: %w", err)))
+			p.stopWithError(errors.WithStack(fmt.Errorf("printOperation planner id: %d: failed to minify: %w", p.id, err)))
 			return nil, nil
 		}
 		if madeReplacements && kit.buf.Len() < len(rawOperationBytes) {
@@ -1596,7 +1600,7 @@ func (p *Planner[T]) replaceQueryType(definition *ast.Document) {
 	definition.ReplaceRootOperationTypeDefinition(p.rootTypeName, ast.OperationTypeQuery)
 }
 
-// normalizeOperation - normalizes operation against definition.
+// normalizeOperation normalizes operation against definition.
 func (p *Planner[T]) normalizeOperation(operation, definition *ast.Document, report *operationreport.Report) (ok bool) {
 	report.Reset()
 	normalizer := astnormalization.NewWithOpts(
@@ -1611,6 +1615,7 @@ func (p *Planner[T]) normalizeOperation(operation, definition *ast.Document, rep
 	return !report.HasErrors()
 }
 
+// handleFieldAlias determines the appropriate field name and alias for a given field reference.
 func (p *Planner[T]) handleFieldAlias(ref int) (newFieldName string, alias ast.Alias) {
 	fieldName := p.visitor.Operation.FieldNameString(ref)
 	alias = ast.Alias{
@@ -1650,7 +1655,7 @@ func (p *Planner[T]) handleFieldAlias(ref int) (newFieldName string, alias ast.A
 	return fieldName, alias
 }
 
-// addField - add a field to an upstream operation
+// addField adds a field referenced by ref to the upstream operation.
 func (p *Planner[T]) addField(ref int) (upstreamFieldRef int) {
 	fieldName, alias := p.handleFieldAlias(ref)
 
@@ -1673,7 +1678,7 @@ func (p *Planner[T]) addField(ref int) (upstreamFieldRef int) {
 type OnWsConnectionInitCallback func(ctx context.Context, url string, header http.Header) (json.RawMessage, error)
 
 type printKit struct {
-	buf        *bytes.Buffer
+	buf        *bytes.Buffer // output goes here
 	parser     *astparser.Parser
 	printer    *astprinter.Printer
 	validator  *astvalidation.OperationValidator
@@ -1684,11 +1689,18 @@ type printKit struct {
 var (
 	printKitPool = &sync.Pool{
 		New: func() any {
+			validator := astvalidation.DefaultOperationValidator()
+			// as we are creating operation programmatically in the graphql datasource planner,
+			// we need to catch incorrect behavior of the planner
+			// as graphql datasource planner should visit only selection sets which has fields,
+			// landed to the current planner
+			validator.RegisterRule(astvalidation.ValidateEmptySelectionSets())
+
 			return &printKit{
 				buf:       &bytes.Buffer{},
 				parser:    astparser.NewParser(),
 				printer:   astprinter.NewPrinter(nil),
-				validator: astvalidation.DefaultOperationValidator(),
+				validator: validator,
 				normalizer: astnormalization.NewWithOpts(
 					astnormalization.WithExtractVariables(),
 					astnormalization.WithRemoveFragmentDefinitions(),
@@ -1730,9 +1742,9 @@ func NewFactory(executionContext context.Context, httpClient *http.Client, subsc
 	}, nil
 }
 
-// NewFactory (GRPC) creates a new factory for the GraphQL datasource planner
+// NewFactoryGRPC creates a gRPC factory for the GraphQL datasource planner.
 // Graphql Datasource could be stateful in case you are using subscriptions,
-// make sure you are using the same execution context for all datasources
+// make sure you are using the same execution context for all datasources.
 func NewFactoryGRPC(executionContext context.Context, grpcClient grpc.ClientConnInterface) (*Factory[Configuration], error) {
 	if executionContext == nil {
 		return nil, fmt.Errorf("execution context is required")
@@ -1752,7 +1764,7 @@ func NewFactoryGRPC(executionContext context.Context, grpcClient grpc.ClientConn
 // This factory is used when the gRPC client is provided by a function.
 // This is useful when you don't want to provide a static client to the factory and let the consumer
 // decide how to provide the client to the datasource.
-// For example when you need to recreate the client in case of a connection error.
+// For example, when you need to recreate the client in case of a connection error.
 func NewFactoryGRPCClientProvider(executionContext context.Context, clientProvider func() grpc.ClientConnInterface) (*Factory[Configuration], error) {
 	if executionContext == nil {
 		return nil, fmt.Errorf("execution context is required")
@@ -1804,6 +1816,16 @@ func (f *Factory[T]) UpstreamSchema(dataSourceConfig plan.DataSourceConfiguratio
 	}
 
 	return schema, true
+}
+
+func (f *Factory[T]) PlanningBehavior() plan.DataSourcePlanningBehavior {
+	b := plan.DataSourcePlanningBehavior{
+		MergeAliasedRootNodes:      true,
+		OverrideFieldPathFromAlias: true,
+		AllowPlanningTypeName:      true,
+		AlwaysFlattenFragments:     f.grpcClient != nil || f.grpcClientProvider != nil,
+	}
+	return b
 }
 
 type Source struct {
@@ -1932,7 +1954,8 @@ type RegularExpression struct {
 }
 
 type SubscriptionSource struct {
-	client GraphQLSubscriptionClient
+	client                 GraphQLSubscriptionClient
+	subscriptionOnStartFns []SubscriptionOnStartFn
 }
 
 func (s *SubscriptionSource) AsyncStart(ctx *resolve.Context, id uint64, input []byte, updater resolve.SubscriptionUpdater) error {
@@ -1981,4 +2004,17 @@ func (s *SubscriptionSource) UniqueRequestID(ctx *resolve.Context, input []byte,
 		return err
 	}
 	return s.client.UniqueRequestID(ctx, options, xxh)
+}
+
+// SubscriptionOnStart is called when a subscription is started.
+// Hooks are invoked sequentially, short-circuiting on the first error.
+func (s *SubscriptionSource) SubscriptionOnStart(ctx resolve.StartupHookContext, input []byte) error {
+	for _, fn := range s.subscriptionOnStartFns {
+		err := fn(ctx, input)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

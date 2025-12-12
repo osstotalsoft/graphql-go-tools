@@ -20,9 +20,8 @@ import (
 // - missing path, which was not planned on the previous walks
 // - we have fields which are waiting for dependencies
 type pathBuilderVisitor struct {
-	logger                             abstractlogger.Logger
-	plannerConfiguration               *Configuration
-	suggestionsSelectionReasonsEnabled bool
+	logger               abstractlogger.Logger
+	plannerConfiguration *Configuration
 
 	operationName         string        // graphql query name
 	operation, definition *ast.Document // graphql operation and schema documents
@@ -36,14 +35,13 @@ type pathBuilderVisitor struct {
 
 	nodeSuggestions *NodeSuggestions // nodeSuggestions holds information about suggested data sources for each field
 
-	parentTypeNodes               []ast.Node          // parentTypeNodes is a stack of parent type nodes - used to determine if the parent is abstract
-	arrayFields                   []arrayField        // arrayFields is a stack of array fields - used to plan nested queries
-	selectionSetRefs              []int               // selectionSetRefs is a stack of selection set refs - used to add a required fields
-	skipFieldsRefs                []int               // skipFieldsRefs holds required field refs added by planner and should not be added to user response
-	missingPathTracker            map[string]struct{} // missingPathTracker is a map of paths which will be added on secondary runs
-	potentiallyMissingPathTracker map[string]struct{} // potentiallyMissingPathTracker is a map of paths which will be added on secondary runs
-	addedPathTracker              []pathConfiguration // addedPathTracker is a list of paths which were added
-	addedPathTrackerIndex         map[string][]int    // addedPathTrackerIndex is a map of path to index in addedPathTracker
+	parentTypeNodes               []ast.Node             // parentTypeNodes is a stack of parent type nodes - used to determine if the parent is abstract
+	arrayFields                   []arrayField           // arrayFields is a stack of array fields - used to plan nested queries
+	selectionSetRefs              []selectionSetTypeInfo // selectionSetRefs is a stack of selection set refs - used to add a required fields
+	missingPathTracker            map[string]struct{}    // missingPathTracker is a map of paths which will be added on secondary runs
+	potentiallyMissingPathTracker map[string]struct{}    // potentiallyMissingPathTracker is a map of paths which will be added on secondary runs
+	addedPathTracker              []pathConfiguration    // addedPathTracker is a list of paths which were added
+	addedPathTrackerIndex         map[string][]int       // addedPathTrackerIndex is a map of path to index in addedPathTracker
 
 	fieldDependenciesForPlanners map[int][]int // fieldDependenciesForPlanners is a map[FieldRef][]plannerIdx holds list of planner ids which depends on a field ref. Used for @key dependencies
 	fieldsPlannedOn              map[int][]int // fieldsPlannedOn is a map[fieldRef][]plannerIdx holds list of planner ids which planned a field ref
@@ -56,6 +54,13 @@ type pathBuilderVisitor struct {
 
 	currentFetchPath    []resolve.FetchItemPathElement
 	currentResponsePath []string
+
+	skipDS []DSSkip // skipDS is a list of datasources to skip when walking field children
+}
+
+type DSSkip struct {
+	popOnFieldRef int
+	DSHash        DSHash
 }
 
 type FailedToCreatePlanningPathsError struct {
@@ -99,6 +104,11 @@ type arrayField struct {
 	fieldPath string
 }
 
+type selectionSetTypeInfo struct {
+	ref       int
+	typeNames []string
+}
+
 type objectFetchConfiguration struct {
 	filter             *resolve.SubscriptionFilter
 	planner            DataSourceFetchPlanner
@@ -114,12 +124,12 @@ type objectFetchConfiguration struct {
 	operationType      ast.OperationType
 }
 
-func (c *pathBuilderVisitor) currentSelectionSet() int {
+func (c *pathBuilderVisitor) currentSelectionSetInfo() (info selectionSetTypeInfo, ok bool) {
 	if len(c.selectionSetRefs) == 0 {
-		return ast.InvalidRef
+		return selectionSetTypeInfo{ref: ast.InvalidRef}, false
 	}
 
-	return c.selectionSetRefs[len(c.selectionSetRefs)-1]
+	return c.selectionSetRefs[len(c.selectionSetRefs)-1], true
 }
 
 func (c *pathBuilderVisitor) plannerPathType(path string) PlannerPathType {
@@ -236,8 +246,8 @@ func (c *pathBuilderVisitor) hasMissingPaths() bool {
 	return len(c.missingPathTracker) > 0
 }
 
-// handleMissingPath - checks if the path was planned and if not, adds the path to the missing path tracker
-func (c *pathBuilderVisitor) populateMissingPahts() {
+// populateMissingPaths - checks if the path was planned and if not, adds the path to the missing path tracker
+func (c *pathBuilderVisitor) populateMissingPaths() {
 	for path := range c.potentiallyMissingPathTracker {
 		if _, ok := c.addedPathDSHash(path); ok {
 			continue
@@ -263,7 +273,7 @@ func (c *pathBuilderVisitor) debugPrint(args ...any) {
 
 func (c *pathBuilderVisitor) EnterDocument(operation, definition *ast.Document) {
 	if c.selectionSetRefs == nil {
-		c.selectionSetRefs = make([]int, 0, 8)
+		c.selectionSetRefs = make([]selectionSetTypeInfo, 0, 8)
 	} else {
 		c.selectionSetRefs = c.selectionSetRefs[:0]
 	}
@@ -312,12 +322,6 @@ func (c *pathBuilderVisitor) EnterDocument(operation, definition *ast.Document) 
 		c.mutationRootFieldPlanners = c.mutationRootFieldPlanners[:0]
 	}
 
-	if c.skipFieldsRefs == nil {
-		c.skipFieldsRefs = make([]int, 0, 8)
-	} else {
-		c.skipFieldsRefs = c.skipFieldsRefs[:0]
-	}
-
 	c.missingPathTracker = make(map[string]struct{})
 	c.potentiallyMissingPathTracker = make(map[string]struct{})
 	c.addedPathTracker = make([]pathConfiguration, 0, 8)
@@ -341,7 +345,6 @@ func (c *pathBuilderVisitor) EnterOperationDefinition(ref int) {
 
 func (c *pathBuilderVisitor) EnterSelectionSet(ref int) {
 	c.debugPrint("EnterSelectionSet ref:", ref)
-	c.selectionSetRefs = append(c.selectionSetRefs, ref)
 	c.parentTypeNodes = append(c.parentTypeNodes, c.walker.EnclosingTypeDefinition)
 
 	// When selection is the inline fragment
@@ -353,12 +356,38 @@ func (c *pathBuilderVisitor) EnterSelectionSet(ref int) {
 	// when all paths for the query are planned. It happens in Planner.removeUnnecessaryFragmentPaths method
 	ancestor := c.walker.Ancestor()
 	if ancestor.Kind != ast.NodeKindInlineFragment {
+		c.selectionSetRefs = append(c.selectionSetRefs, selectionSetTypeInfo{
+			ref: ref,
+		})
 		return
 	}
 
 	parentPath := c.walker.Path[:len(c.walker.Path)-1].DotDelimitedString()
 	currentPath := c.walker.Path.DotDelimitedString()
 	typeName := c.operation.InlineFragmentTypeConditionNameString(ancestor.Ref)
+
+	node, ok := c.definition.NodeByNameStr(typeName)
+	if !ok {
+		c.walker.StopWithInternalErr(fmt.Errorf("inline fragment type condition %q is not defined in the schema", typeName))
+		return
+	}
+
+	// get possible type names for the inline fragment
+	var typeNames []string
+	switch node.Kind {
+	case ast.NodeKindObjectTypeDefinition:
+		typeNames = []string{c.definition.ObjectTypeDefinitionNameString(node.Ref)}
+	case ast.NodeKindInterfaceTypeDefinition:
+		typeNames, _ = c.definition.InterfaceTypeDefinitionImplementedByObjectWithNames(node.Ref)
+	case ast.NodeKindUnionTypeDefinition:
+		typeNames, _ = c.definition.UnionTypeDefinitionMemberTypeNames(node.Ref)
+	default:
+	}
+
+	c.selectionSetRefs = append(c.selectionSetRefs, selectionSetTypeInfo{
+		ref:       ref,
+		typeNames: typeNames,
+	})
 
 	for i, planner := range c.planners {
 		if !planner.HasPath(parentPath) {
@@ -367,7 +396,7 @@ func (c *pathBuilderVisitor) EnterSelectionSet(ref int) {
 
 		hasRootNode := planner.DataSourceConfiguration().HasRootNodeWithTypename(typeName)
 		hasChildNode := planner.DataSourceConfiguration().HasChildNodeWithTypename(typeName)
-		if !(hasRootNode || hasChildNode) {
+		if !hasRootNode && !hasChildNode {
 			// we need to check also if an enclosing type is a union
 			// because we don't have root/child node for a union type
 			if c.walker.EnclosingTypeDefinition.Kind != ast.NodeKindUnionTypeDefinition {
@@ -437,6 +466,12 @@ func (c *pathBuilderVisitor) EnterField(fieldRef int) {
 	suggestions := c.nodeSuggestions.SuggestionsForPath(typeName, fieldName, currentPath)
 	shareable := len(suggestions) > 1
 	for _, suggestion := range suggestions {
+		if idx := slices.IndexFunc(c.skipDS, func(skip DSSkip) bool {
+			return skip.DSHash == suggestion.DataSourceHash
+		}); idx != -1 {
+			continue
+		}
+
 		dsIdx := slices.IndexFunc(c.dataSources, func(d DataSource) bool {
 			return d.Hash() == suggestion.DataSourceHash
 		})
@@ -449,26 +484,68 @@ func (c *pathBuilderVisitor) EnterField(fieldRef int) {
 		if !c.couldPlanField(fieldRef, ds.Hash()) {
 			c.handleMissingPath(false, typeName, fieldName, currentPath, shareable)
 
-			// if we could not plan the field, we should skip walking into it
-			// as the dependencies conditions are tight to this field,
-			// and we could mistakenly plan the nested fields on this datasource without current field
-			// It could happen when there are the same field as current on another datasource, and it is allowed to plan it
-			c.walker.SkipNode()
-			return
+			/*
+				if we could not plan the field, we should skip planning children on the same datasource
+				as the dependency conditions are tight to this field.
+				We could mistakenly plan the nested fields on this datasource without current field/
+				It could happen when there is the same field as current on another datasource, and it is allowed to plan it.
+				We want to be able to plan fields on other datasource, because current field on this datasource
+				could depend on the child fields of the same field on another datasource
+
+				example:
+
+				type Entity @key(fields: "nested { a b }") {
+					nested: NestedType
+				}
+
+				type NestedType {
+					a: String
+					b: String
+					c: String
+				}
+
+				We want to get Entity.nested.c but it depends on Entity.nested.a and Entity.nested.b as keys
+				Within query it will mean that field Entity.nested depends on fields Entity.nested.a and Entity.nested.b
+				But as we track all fields including parent, it will mean that Entity.nested depends on Entity.nested within
+				the same query and field ref will be the same
+
+				So we need to allow processing nested fields on other datasources, but not on the current one
+			*/
+
+			c.skipDS = append(c.skipDS, DSSkip{
+				popOnFieldRef: fieldRef,
+				DSHash:        ds.Hash(),
+			})
+
+			continue
 		}
 
 		c.handlePlanningField(fieldRef, typeName, fieldName, currentPath, parentPath, precedingParentPath, suggestion, ds, shareable)
 	}
 
-	// we should update response path and array fields only when we are able to plan - so field is not skipped
-	// 1. Because current response path for the field should not include field itself
-	// 2. To have correct state - when we add something in the EnterField callback,
-	// but we call walker.SkipNode - LeaveField callback won't be called,
-	// and we will have an incorrect state
-
 	c.addArrayField(fieldRef, currentPath)
 	// pushResponsePath uses array fields so it should be called after addArrayField
 	c.pushResponsePath(fieldRef, fieldAliasOrName)
+}
+
+func (c *pathBuilderVisitor) LeaveField(ref int) {
+	if c.isNotOperationDefinitionRoot() {
+		return
+	}
+
+	if c.plannerConfiguration.Debug.ConfigurationVisitor {
+		fieldAliasOrName := c.operation.FieldAliasOrNameString(ref)
+		typeName := c.walker.EnclosingTypeDefinition.NameString(c.definition)
+		c.debugPrint("LeaveField ref:", ref, "fieldName:", fieldAliasOrName, "typeName:", typeName)
+	}
+
+	// pop response path uses array fields so it should be called before removeArrayField
+	c.popResponsePath(ref)
+	c.removeArrayField(ref)
+
+	c.skipDS = slices.DeleteFunc(c.skipDS, func(s DSSkip) bool {
+		return s.popOnFieldRef == ref
+	})
 }
 
 func (c *pathBuilderVisitor) handlePlanningField(fieldRef int, typeName, fieldName, currentPath, parentPath, precedingParentPath string, suggestion *NodeSuggestion, ds DataSource, shareable bool) {
@@ -689,8 +766,8 @@ func (c *pathBuilderVisitor) isAllFieldDependenciesOnSameDataSource(fieldRef int
 
 func (c *pathBuilderVisitor) planWithExistingPlanners(fieldRef int, typeName, fieldName, currentPath, parentPath, precedingParentPath string, suggestion *NodeSuggestion) (plannerIdx int, planned bool) {
 	for plannerIdx, plannerConfig := range c.planners {
-		planningBehaviour := plannerConfig.DataSourcePlanningBehavior()
 		dsConfiguration := plannerConfig.DataSourceConfiguration()
+		planningBehaviour := dsConfiguration.PlanningBehavior()
 		currentPlannerDSHash := dsConfiguration.Hash()
 
 		hasSuggestion := suggestion != nil
@@ -986,9 +1063,15 @@ func (c *pathBuilderVisitor) pushResponsePath(fieldRef int, fieldName string) {
 		return
 	}
 
+	var typeNames []string
+	if info, ok := c.currentSelectionSetInfo(); ok {
+		typeNames = info.typeNames
+	}
+
 	c.currentFetchPath = append(c.currentFetchPath, resolve.FetchItemPathElement{
-		Kind: resolve.FetchItemPathElementKindObject,
-		Path: []string{fieldName},
+		Kind:      resolve.FetchItemPathElementKindObject,
+		Path:      []string{fieldName},
+		TypeNames: typeNames,
 	})
 }
 
@@ -1181,37 +1264,19 @@ func (c *pathBuilderVisitor) handleMissingPath(planned bool, typeName string, fi
 		// all suggestions were planned, so we should not record a missing path
 		return
 	}
-
-	if !shareable {
-		c.walker.SkipNode()
-	}
 }
 
-func (c *pathBuilderVisitor) LeaveField(ref int) {
-	if c.isNotOperationDefinitionRoot() {
-		return
-	}
-
-	fieldAliasOrName := c.operation.FieldAliasOrNameString(ref)
-	typeName := c.walker.EnclosingTypeDefinition.NameString(c.definition)
-	c.debugPrint("LeaveField ref:", ref, "fieldName:", fieldAliasOrName, "typeName:", typeName)
-
-	// pop response path uses array fields so it should be called before removeArrayField
-	c.popResponsePath(ref)
-	c.removeArrayField(ref)
-}
-
-// addPlannerPathForTypename adds a path for the __typename field
-// adding __typename should be done only in case particular planner has parent path
-// otherwise it will be added to all planners and will cause visiting of incorrect selection sets
+// addPlannerPathForTypename adds a path for the __typename field.
 func (c *pathBuilderVisitor) addPlannerPathForTypename(
 	plannerIndex int, currentPath string, parentPath string, fieldRef int, fieldName string, typeName string,
 	planningBehaviour DataSourcePlanningBehavior,
 ) (pathAdded bool) {
+	// Adding __typename should happen only if particular planner has parent path,
+	// otherwise it will be added to all planners and will cause visiting of incorrect selection sets.
 	if fieldName != typeNameField {
 		return false
 	}
-	if !planningBehaviour.IncludeTypeNameFields {
+	if !planningBehaviour.AllowPlanningTypeName {
 		return false
 	}
 

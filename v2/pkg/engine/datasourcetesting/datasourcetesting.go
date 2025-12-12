@@ -11,11 +11,8 @@ import (
 	"github.com/kylelemons/godebug/pretty"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/wundergraph/astjson"
 
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/internal/unsafeprinter"
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/testing/permutations"
+	"github.com/wundergraph/astjson"
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astnormalization"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astprinter"
@@ -23,15 +20,20 @@ import (
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astvalidation"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/plan"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/postprocess"
+	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/internal/unsafeparser"
+	"github.com/wundergraph/graphql-go-tools/v2/pkg/internal/unsafeprinter"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/operationreport"
+	"github.com/wundergraph/graphql-go-tools/v2/pkg/testing/permutations"
 )
 
 type testOptions struct {
-	postProcessors []*postprocess.Processor
-	skipReason     string
-	withFieldInfo  bool
-	withPrintPlan  bool
+	postProcessors        []*postprocess.Processor
+	skipReason            string
+	withFieldInfo         bool
+	withPrintPlan         bool
+	withFieldDependencies bool
+	withFetchReasons      bool
 }
 
 func WithPostProcessors(postProcessors ...*postprocess.Processor) func(*testOptions) {
@@ -64,6 +66,21 @@ func WithPrintPlan() func(*testOptions) {
 	return func(o *testOptions) {
 		o.withPrintPlan = true
 		o.withFieldInfo = true
+	}
+}
+
+func WithFieldDependencies() func(*testOptions) {
+	return func(o *testOptions) {
+		o.withFieldInfo = true
+		o.withFieldDependencies = true
+	}
+}
+
+func WithFetchReasons() func(*testOptions) {
+	return func(o *testOptions) {
+		o.withFieldInfo = true
+		o.withFieldDependencies = true
+		o.withFetchReasons = true
 	}
 }
 
@@ -125,6 +142,7 @@ func RunTestWithVariables(definition, operation, operationName, variables string
 
 		// by default, we don't want to have field info in the tests because it's too verbose
 		config.DisableIncludeInfo = true
+		config.DisableIncludeFieldDependencies = true
 
 		opts := &testOptions{}
 		for _, o := range options {
@@ -133,6 +151,14 @@ func RunTestWithVariables(definition, operation, operationName, variables string
 
 		if opts.withFieldInfo {
 			config.DisableIncludeInfo = false
+		}
+
+		if opts.withFieldDependencies {
+			config.DisableIncludeFieldDependencies = false
+		}
+
+		if opts.withFetchReasons {
+			config.BuildFetchReasons = true
 		}
 
 		if opts.skipReason != "" {

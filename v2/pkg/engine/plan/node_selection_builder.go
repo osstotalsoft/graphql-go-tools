@@ -3,6 +3,7 @@ package plan
 import (
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astprinter"
@@ -19,26 +20,50 @@ type NodeSelectionBuilder struct {
 	nodeSelectionsVisitor *nodeSelectionVisitor
 }
 
+type fieldDependencyKind int
+
+const (
+	fieldDependencyKindKey fieldDependencyKind = iota
+	fieldDependencyKindRequires
+)
+
 type NodeSelectionResult struct {
-	dataSources              []DataSource                                     // data sources configurations, which used by the current operation
-	nodeSuggestions          *NodeSuggestions                                 // nodeSuggestions holds information about suggested data sources for each field
-	fieldDependsOn           map[fieldIndexKey][]int                          // fieldDependsOn is a map[fieldIndexKey][]fieldRef - holds list of field refs which are required by a field ref, e.g. field should be planned only after required fields were planned
-	fieldRequirementsConfigs map[fieldIndexKey][]FederationFieldConfiguration // fieldRequirementsConfigs is a map[fieldIndexKey]FederationFieldConfiguration - holds a list of required configuratuibs for a field ref to later built representation variables
-	skipFieldsRefs           []int                                            // skipFieldsRefs holds required field refs added by planner and should not be added to user response
+	// data sources configurations, used by the current operation
+	dataSources []DataSource
+
+	// nodeSuggestions holds information about suggested data sources for each field
+	nodeSuggestions *NodeSuggestions
+
+	// fieldDependsOn maps fieldIndexKey to a list of fields refs. Those fields should be planned
+	// before the fieldIndexKey.fieldRef.
+	fieldDependsOn map[fieldIndexKey][]int
+
+	// fieldRequirementsConfigs maps fieldIndexKey to a list of required configurations that are
+	// used later to build representation variables.
+	fieldRequirementsConfigs map[fieldIndexKey][]FederationFieldConfiguration
+
+	// skipFieldsRefs holds required field refs added by the planner.
+	// These fields should not be added to user response.
+	skipFieldsRefs []int
+
+	fieldRefDependsOn   map[int][]int
+	fieldDependencyKind map[fieldDependencyKey]fieldDependencyKind
 }
 
 func NewNodeSelectionBuilder(config *Configuration) *NodeSelectionBuilder {
-	nodeSelectionsWalker := astvisitor.NewWalker(48)
+	nodeSelectionsWalker := astvisitor.NewWalkerWithID(48, "NodeSelectionsWalker")
 	nodeSelectionVisitor := &nodeSelectionVisitor{
-		walker: &nodeSelectionsWalker,
+		walker:                        &nodeSelectionsWalker,
+		addTypenameInNestedSelections: config.ValidateRequiredExternalFields,
+		newFieldRefs:                  make(map[int]struct{}),
 	}
 
-	nodeSelectionsWalker.RegisterEnterDocumentVisitor(nodeSelectionVisitor)
+	nodeSelectionsWalker.RegisterDocumentVisitor(nodeSelectionVisitor)
 	nodeSelectionsWalker.RegisterFieldVisitor(nodeSelectionVisitor)
 	nodeSelectionsWalker.RegisterEnterOperationVisitor(nodeSelectionVisitor)
 	nodeSelectionsWalker.RegisterSelectionSetVisitor(nodeSelectionVisitor)
 
-	nodeResolvableWalker := astvisitor.NewWalker(32)
+	nodeResolvableWalker := astvisitor.NewWalkerWithID(32, "NodeResolvableWalker")
 	nodeResolvableVisitor := &nodesResolvableVisitor{
 		walker: &nodeResolvableWalker,
 	}
@@ -60,10 +85,11 @@ func (p *NodeSelectionBuilder) SetOperationName(name string) {
 
 func (p *NodeSelectionBuilder) ResetSkipFieldRefs() {
 	p.nodeSelectionsVisitor.skipFieldsRefs = nil
+	p.nodeSelectionsVisitor.newFieldRefs = make(map[int]struct{})
 }
 
 func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, report *operationreport.Report) (out *NodeSelectionResult) {
-	dsFilter := NewDataSourceFilter(operation, definition, report)
+	dsFilter := NewDataSourceFilter(operation, definition, report, p.config.DataSources, p.nodeSelectionsVisitor.newFieldRefs)
 
 	if p.config.Debug.PrintNodeSuggestions {
 		dsFilter.EnableSelectionReasons()
@@ -78,7 +104,7 @@ func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, 
 
 	// set initial suggestions and used data sources
 	p.nodeSelectionsVisitor.dataSources, p.nodeSelectionsVisitor.nodeSuggestions =
-		dsFilter.FilterDataSources(p.config.DataSources, nil, nil, nil)
+		dsFilter.FilterDataSources(nil, nil)
 	if report.HasErrors() {
 		return
 	}
@@ -99,9 +125,9 @@ func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, 
 	}
 
 	i := 1
+	hasUnresolvedFields := false
 	// secondary runs to add path for the new required fields
-	for p.nodeSelectionsVisitor.shouldRevisit() {
-
+	for p.nodeSelectionsVisitor.hasNewFields || hasUnresolvedFields {
 		// when we have rewritten a field old node suggestion are not make sense anymore
 		// so we are removing child nodes of the rewritten fields
 		for _, fieldRef := range p.nodeSelectionsVisitor.rewrittenFieldRefs {
@@ -113,7 +139,7 @@ func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, 
 		if p.nodeSelectionsVisitor.hasNewFields {
 			// update suggestions for the new required fields
 			p.nodeSelectionsVisitor.dataSources, p.nodeSelectionsVisitor.nodeSuggestions =
-				dsFilter.FilterDataSources(p.config.DataSources, p.nodeSelectionsVisitor.nodeSuggestions, p.nodeSelectionsVisitor.fieldLandedTo, p.nodeSelectionsVisitor.fieldRefDependsOn)
+				dsFilter.FilterDataSources(p.nodeSelectionsVisitor.fieldLandedTo, p.nodeSelectionsVisitor.fieldRefDependsOn)
 			if report.HasErrors() {
 				return
 			}
@@ -141,15 +167,19 @@ func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, 
 		i++
 
 		if resolvableReport := p.isResolvable(operation, definition, p.nodeSelectionsVisitor.nodeSuggestions); resolvableReport.HasErrors() {
-			p.nodeSelectionsVisitor.hasUnresolvedFields = true
+			hasUnresolvedFields = true
 
 			if i > 100 {
 				report.AddInternalError(fmt.Errorf("could not resolve a field: %v", resolvableReport))
 				return
 			}
+
+			continue
+		} else {
+			hasUnresolvedFields = false
 		}
 
-		// TODO: what logic should be here?
+		// if we have revisited operation more than 100 times, we have a bug
 		if i > 100 {
 			report.AddInternalError(fmt.Errorf("something went wrong"))
 			return
@@ -159,8 +189,8 @@ func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, 
 	if i == 1 {
 		// if we have not revisited the operation, we need to check if it is resolvable
 		if resolvableReport := p.isResolvable(operation, definition, p.nodeSelectionsVisitor.nodeSuggestions); resolvableReport.HasErrors() {
-			p.nodeSelectionsVisitor.hasUnresolvedFields = true
 			report.AddInternalError(fmt.Errorf("could not resolve a field: %v", resolvableReport))
+			return
 		}
 	}
 
@@ -170,6 +200,8 @@ func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, 
 		fieldDependsOn:           p.nodeSelectionsVisitor.fieldDependsOn,
 		fieldRequirementsConfigs: p.nodeSelectionsVisitor.fieldRequirementsConfigs,
 		skipFieldsRefs:           p.nodeSelectionsVisitor.skipFieldsRefs,
+		fieldRefDependsOn:        p.nodeSelectionsVisitor.fieldRefDependsOn,
+		fieldDependencyKind:      p.nodeSelectionsVisitor.fieldDependencyKind,
 	}
 }
 
@@ -186,21 +218,27 @@ func (p *NodeSelectionBuilder) printOperation(operation *ast.Document) {
 
 	if p.config.Debug.PrintOperationEnableASTRefs {
 		pp, _ = astprinter.PrintStringIndentDebug(operation, "  ", func(fieldRef int, out io.Writer) {
-			if p.nodeSelectionsVisitor.nodeSuggestions == nil {
-				return
-			}
-
-			treeNodeId := TreeNodeID(fieldRef)
-			node, ok := p.nodeSelectionsVisitor.nodeSuggestions.responseTree.Find(treeNodeId)
-			if !ok {
-				return
-			}
-
-			items := node.GetData()
-			for _, id := range items {
-				if p.nodeSelectionsVisitor.nodeSuggestions.items[id].Selected {
-					fmt.Fprintf(out, "  %s", p.nodeSelectionsVisitor.nodeSuggestions.items[id].StringShort())
+			if p.config.Debug.PrintNodeSuggestions {
+				if p.nodeSelectionsVisitor.nodeSuggestions == nil {
+					return
 				}
+
+				treeNodeId := TreeNodeID(fieldRef)
+				node, ok := p.nodeSelectionsVisitor.nodeSuggestions.responseTree.Find(treeNodeId)
+				if !ok {
+					return
+				}
+
+				items := node.GetData()
+				for _, id := range items {
+					if p.nodeSelectionsVisitor.nodeSuggestions.items[id].Selected {
+						_, _ = fmt.Fprintf(out, "  %s", p.nodeSelectionsVisitor.nodeSuggestions.items[id].StringShort())
+					}
+				}
+			}
+
+			if slices.Contains(p.nodeSelectionsVisitor.skipFieldsRefs, fieldRef) {
+				_, _ = fmt.Fprintf(out, "  (skip)")
 			}
 		})
 	} else {
