@@ -11,6 +11,7 @@ import (
 	protoref "google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/wundergraph/astjson"
+	"github.com/wundergraph/go-arena"
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
 )
@@ -23,80 +24,6 @@ const (
 	resolveResponsePath = "result"    // Path for resolve response
 )
 
-// entityIndex represents the mapping between representation order and result order
-// for GraphQL federation entities. This is crucial for maintaining correct entity
-// order when multiple subgraphs return entities in different orders.
-type entityIndex struct {
-	representationIndex int // Index in the original representation array
-	resultIndex         int // Index where this entity should appear in the final result
-}
-
-// indexMap maps GraphQL type names to their corresponding entity indices
-// This allows proper ordering of federated entities by type
-type indexMap map[string][]entityIndex
-
-// getResultIndex returns the correct result index for an entity based on its type
-// and representation index. This ensures federated entities maintain proper ordering
-// across multiple subgraph responses.
-func (i indexMap) getResultIndex(val *astjson.Value, representationIndex int) int {
-	if i == nil {
-		return representationIndex
-	}
-
-	if val == nil {
-		return representationIndex
-	}
-
-	// Extract the __typename field to determine entity type
-	typeName := val.Get("__typename").GetStringBytes()
-
-	// Find the correct result index for this type and representation index
-	for _, entityIndex := range i[string(typeName)] {
-		if entityIndex.representationIndex == representationIndex {
-			return entityIndex.resultIndex
-		}
-	}
-
-	// Fallback to representation index if no mapping found
-	return representationIndex
-}
-
-// createRepresentationIndexMap builds an index mapping for GraphQL federation entities
-// from the variables containing entity representations. This map is used to ensure
-// that entities are returned in the correct order when merging responses from multiple
-// subgraphs, which is critical for GraphQL federation correctness.
-func createRepresentationIndexMap(variables gjson.Result) indexMap {
-	var representations []gjson.Result
-	r := variables.Get("representations")
-	if !r.Exists() {
-		return nil
-	}
-
-	representations = r.Array()
-	im := make(indexMap)
-	indexSet := make(map[string]int) // Track count per type name
-
-	// Build mapping for each representation
-	for i, representation := range representations {
-		typeName := representation.Get("__typename").String()
-
-		// Initialize counter for new type names
-		if _, ok := indexSet[typeName]; !ok {
-			indexSet[typeName] = -1
-		}
-
-		// Increment index for this type
-		indexSet[typeName]++
-
-		// Create mapping entry for this entity
-		im[typeName] = append(im[typeName], entityIndex{
-			representationIndex: indexSet[typeName], // Position within entities of this type
-			resultIndex:         i,                  // Position in the overall result array
-		})
-	}
-	return im
-}
-
 // jsonBuilder is the core component responsible for converting gRPC protobuf responses
 // into GraphQL-compatible JSON format. It handles complex scenarios including:
 // - GraphQL federation entity merging and ordering
@@ -106,79 +33,32 @@ func createRepresentationIndexMap(variables gjson.Result) indexMap {
 type jsonBuilder struct {
 	mapping   *GRPCMapping // Mapping configuration for GraphQL to gRPC translation
 	variables gjson.Result // GraphQL variables containing entity representations
-	indexMap  indexMap     // Entity index mapping for federation ordering
+	jsonArena arena.Arena
 }
 
 // newJSONBuilder creates a new JSON builder instance with the provided mapping
 // and variables. The builder automatically creates an index map for proper
 // federation entity ordering if representations are present in the variables.
-func newJSONBuilder(mapping *GRPCMapping, variables gjson.Result) *jsonBuilder {
+func newJSONBuilder(a arena.Arena, mapping *GRPCMapping, variables gjson.Result) *jsonBuilder {
 	return &jsonBuilder{
 		mapping:   mapping,
 		variables: variables,
-		indexMap:  createRepresentationIndexMap(variables),
+		jsonArena: a,
 	}
-}
-
-// validateFederatedResponse validates that the federated response is valid
-// by checking that the number of entities per type is correct.
-// For non-federated responses, this function is a no-op.
-func (j *jsonBuilder) validateFederatedResponse(response *astjson.Value) error {
-	if j.indexMap == nil {
-		return nil
-	}
-
-	// Get the entities array from the response
-	// If we have an index map, we expect it to be a federated response
-	entities, err := response.Get(entityPath).Array()
-	if err != nil {
-		return err
-	}
-
-	// Count the number of entities per type
-	entitiyCountPerType := make(map[string]int)
-	for _, entity := range entities {
-		entityType := entity.Get("__typename").GetStringBytes()
-		entitiyCountPerType[string(entityType)]++
-	}
-
-	// Check that the number of entities per type is correct and exists in the index map.
-	for typeName, count := range entitiyCountPerType {
-		em, found := j.indexMap[typeName]
-		if !found {
-			return fmt.Errorf("entity type %s received in the subgraph response, but was not expected", typeName)
-		}
-
-		if len(em) != count {
-			return fmt.Errorf("entity type %s received %d entities in the subgraph response, but %d are expected", typeName, count, len(em))
-		}
-	}
-	return nil
 }
 
 // mergeValues combines two JSON values while preserving proper federation entity ordering.
 // This is a critical function for GraphQL federation where multiple subgraphs may
 // return entities that need to be merged in the correct order.
-func (j *jsonBuilder) mergeValues(left *astjson.Value, right *astjson.Value) (*astjson.Value, error) {
-	if len(j.indexMap) == 0 {
+func (j *jsonBuilder) mergeValues(left *astjson.Value, right resultData) (*astjson.Value, error) {
+	if right.kind != CallKindEntity {
 		// No federation index map available - use simple merge
 		// This path is taken for non-federated queries
-		root, _, err := astjson.MergeValues(left, right)
+		root, _, err := astjson.MergeValues(j.jsonArena, left, right.response)
 		if err != nil {
 			return nil, err
 		}
 		return root, nil
-	}
-
-	// Federation entities present - must preserve representation order
-	leftObject, err := left.Object()
-	if err != nil {
-		return nil, err
-	}
-
-	// If left side is empty, just return right side
-	if leftObject.Len() == 0 {
-		return right, nil
 	}
 
 	// Perform federation-aware entity merging
@@ -188,36 +68,34 @@ func (j *jsonBuilder) mergeValues(left *astjson.Value, right *astjson.Value) (*a
 // mergeEntities performs federation-aware merging of entity arrays from multiple subgraph responses.
 // This function ensures that entities are placed in the correct positions in the final response
 // array based on their original representation order, which is critical for GraphQL federation.
-func (j *jsonBuilder) mergeEntities(left *astjson.Value, right *astjson.Value) (*astjson.Value, error) {
-	arena := astjson.Arena{}
+//
+// entityIndexMap is indexed directly without bounds checks: if the lengths
+// did not match we would have already aborted in validateEntityResponse.
+//
+// On the first call, left is the empty root object and we allocate a fresh
+// _entities array. On subsequent calls, left is the result of a previous
+// mergeEntities call and already holds the _entities array, so we mutate it
+// in place rather than copying every accumulated entity into a new array.
+func (j *jsonBuilder) mergeEntities(left *astjson.Value, rightResult resultData) (*astjson.Value, error) {
+	right := rightResult.response
+	rightEntities := right.Get(entityPath).GetArray()
 
-	// Create the response structure with _entities array
-	entities := arena.NewObject()
-	entities.Set(entityPath, arena.NewArray())
-	arr := entities.Get(entityPath)
-
-	// Extract entity arrays from both responses
-	leftRepresentations, err := left.Get(entityPath).Array()
-	if err != nil {
-		return nil, err
+	if left == nil {
+		left = astjson.ObjectValue(j.jsonArena)
 	}
 
-	rightRepresentations, err := right.Get(entityPath).Array()
-	if err != nil {
-		return nil, err
+	arr := left.Get(entityPath)
+	if arr == nil || arr.Type() != astjson.TypeArray {
+		left.Set(j.jsonArena, entityPath, astjson.ArrayValue(j.jsonArena))
+		arr = left.Get(entityPath)
 	}
 
-	// Merge left entities using index mapping to preserve order
-	for index, lr := range leftRepresentations {
-		arr.SetArrayItem(j.indexMap.getResultIndex(lr, index), lr)
+	// Place right's entities at their global positions in the merged array.
+	for index, rr := range rightEntities {
+		arr.SetArrayItem(j.jsonArena, rightResult.entityIndexMap[index], rr)
 	}
 
-	// Merge right entities using index mapping to preserve order
-	for index, rr := range rightRepresentations {
-		arr.SetArrayItem(j.indexMap.getResultIndex(rr, index), rr)
-	}
-
-	return entities, nil
+	return left, nil
 }
 
 // mergeWithPath merges a JSON value with a resolved value by its path.
@@ -227,6 +105,9 @@ func (j *jsonBuilder) mergeWithPath(base *astjson.Value, resolved *astjson.Value
 	}
 
 	resolvedValues := resolved.GetArray(resolveResponsePath)
+	if len(resolvedValues) == 0 {
+		return nil
+	}
 
 	searchPath := path[:len(path)-1]
 	elementName := path[len(path)-1].FieldName.String()
@@ -257,7 +138,7 @@ func (j *jsonBuilder) mergeWithPath(base *astjson.Value, resolved *astjson.Value
 	}
 
 	for i := range responseValues {
-		responseValues[i].Set(elementName, resolvedValues[i].Get(elementName))
+		responseValues[i].Set(j.jsonArena, elementName, resolvedValues[i].Get(elementName))
 	}
 
 	return nil
@@ -272,6 +153,10 @@ func (j *jsonBuilder) flattenObject(value *astjson.Value, path ast.Path) ([]*ast
 
 	segment := path[0]
 	current := value.Get(segment.FieldName.String())
+	if current == nil {
+		return nil, fmt.Errorf("field %s not found in object", segment.FieldName.String())
+	}
+
 	result := make([]*astjson.Value, 0)
 	switch current.Type() {
 	case astjson.TypeObject:
@@ -315,12 +200,12 @@ func (j *jsonBuilder) flattenList(items []*astjson.Value, path ast.Path) ([]*ast
 // marshalResponseJSON converts a protobuf message into a GraphQL-compatible JSON response.
 // This is the core marshaling function that handles all the complex type conversions,
 // including oneOf types, nested messages, lists, and scalar values.
-func (j *jsonBuilder) marshalResponseJSON(arena *astjson.Arena, message *RPCMessage, data protoref.Message) (*astjson.Value, error) {
+func (j *jsonBuilder) marshalResponseJSON(message *RPCMessage, data protoref.Message) (*astjson.Value, error) {
 	if message == nil {
-		return arena.NewNull(), nil
+		return astjson.NullValue, nil
 	}
 
-	root := arena.NewObject()
+	root := astjson.ObjectValue(j.jsonArena)
 
 	// Handle protobuf oneOf types - these represent GraphQL union/interface types
 	if message.IsOneOf() {
@@ -345,7 +230,7 @@ func (j *jsonBuilder) marshalResponseJSON(arena *astjson.Arena, message *RPCMess
 	validFields := message.Fields
 	if message.IsOneOf() {
 		// For oneOf types, add type-specific fields based on the actual concrete type
-		validFields = append(validFields, message.FieldSelectionSet.SelectFieldsForTypes(message.SelectValidTypes(string(data.Type().Descriptor().Name())))...)
+		validFields = append(validFields, message.FragmentFields.SelectFieldsForTypes(message.SelectValidTypes(string(data.Type().Descriptor().Name())))...)
 	}
 
 	// Process each field in the message
@@ -354,14 +239,14 @@ func (j *jsonBuilder) marshalResponseJSON(arena *astjson.Arena, message *RPCMess
 		if field.StaticValue != "" {
 			if len(message.MemberTypes) == 0 {
 				// Simple static value - use as-is
-				root.Set(field.AliasOrPath(), arena.NewString(field.StaticValue))
+				root.Set(j.jsonArena, field.AliasOrPath(), astjson.StringValue(j.jsonArena, field.StaticValue))
 				continue
 			}
 
 			// Type-specific static value - match against member types
-			for _, memberTypes := range message.MemberTypes {
-				if memberTypes == string(data.Type().Descriptor().Name()) {
-					root.Set(field.AliasOrPath(), arena.NewString(memberTypes))
+			for _, memberType := range message.MemberTypes {
+				if memberType == string(data.Type().Descriptor().Name()) {
+					root.Set(j.jsonArena, field.AliasOrPath(), astjson.StringValue(j.jsonArena, memberType))
 					break
 				}
 			}
@@ -379,8 +264,8 @@ func (j *jsonBuilder) marshalResponseJSON(arena *astjson.Arena, message *RPCMess
 		// Handle list fields (repeated in protobuf)
 		if fd.IsList() {
 			list := data.Get(fd).List()
-			arr := arena.NewArray()
-			root.Set(field.AliasOrPath(), arr)
+			arr := astjson.ArrayValue(j.jsonArena)
+			root.Set(j.jsonArena, field.AliasOrPath(), arr)
 
 			if !list.IsValid() {
 				// Invalid list - leave as empty array
@@ -393,15 +278,15 @@ func (j *jsonBuilder) marshalResponseJSON(arena *astjson.Arena, message *RPCMess
 				case protoref.MessageKind:
 					// List of messages - recursively marshal each message
 					message := list.Get(i).Message()
-					value, err := j.marshalResponseJSON(arena, field.Message, message)
+					value, err := j.marshalResponseJSON(field.Message, message)
 					if err != nil {
 						return nil, err
 					}
 
-					arr.SetArrayItem(i, value)
+					arr.SetArrayItem(j.jsonArena, i, value)
 				default:
 					// List of scalar values - convert directly
-					j.setArrayItem(i, arena, arr, list.Get(i), fd)
+					j.setArrayItem(i, arr, list.Get(i), fd)
 				}
 			}
 
@@ -413,24 +298,24 @@ func (j *jsonBuilder) marshalResponseJSON(arena *astjson.Arena, message *RPCMess
 			msg := data.Get(fd).Message()
 			if !msg.IsValid() {
 				// Invalid message - set to null
-				root.Set(field.AliasOrPath(), arena.NewNull())
+				root.Set(j.jsonArena, field.AliasOrPath(), astjson.NullValue)
 				continue
 			}
 
 			// Handle special list wrapper types for complex nested lists
 			if field.IsListType {
-				arr, err := j.flattenListStructure(arena, field.ListMetadata, msg, field.Message)
+				arr, err := j.flattenListStructure(field.ListMetadata, msg, field.Message)
 				if err != nil {
 					return nil, fmt.Errorf("unable to flatten list structure for field %q: %w", field.AliasOrPath(), err)
 				}
 
-				root.Set(field.AliasOrPath(), arr)
+				root.Set(j.jsonArena, field.AliasOrPath(), arr)
 				continue
 			}
 
 			// Handle optional scalar wrapper types (e.g., google.protobuf.StringValue)
 			if field.IsOptionalScalar() {
-				err := j.resolveOptionalField(arena, root, field.AliasOrPath(), msg)
+				err := j.resolveOptionalField(root, field.AliasOrPath(), msg)
 				if err != nil {
 					return nil, err
 				}
@@ -439,27 +324,27 @@ func (j *jsonBuilder) marshalResponseJSON(arena *astjson.Arena, message *RPCMess
 			}
 
 			// Regular nested message - recursively marshal
-			value, err := j.marshalResponseJSON(arena, field.Message, msg)
+			value, err := j.marshalResponseJSON(field.Message, msg)
 			if err != nil {
 				return nil, err
 			}
 
 			if field.JSONPath == "" {
 				// Field should be merged into parent object (flattened)
-				root, _, err = astjson.MergeValues(root, value)
+				root, _, err = astjson.MergeValues(j.jsonArena, root, value)
 				if err != nil {
 					return nil, err
 				}
 			} else {
 				// Field should be nested under its own key
-				root.Set(field.AliasOrPath(), value)
+				root.Set(j.jsonArena, field.AliasOrPath(), value)
 			}
 
 			continue
 		}
 
 		// Handle scalar fields (string, int, bool, etc.)
-		j.setJSONValue(arena, root, field.AliasOrPath(), data, fd)
+		j.setJSONValue(root, field.AliasOrPath(), data, fd)
 	}
 
 	return root, nil
@@ -469,34 +354,34 @@ func (j *jsonBuilder) marshalResponseJSON(arena *astjson.Arena, message *RPCMess
 // messages to support nullable and multi-dimensional lists. This is necessary because
 // protobuf doesn't directly support nullable list items or complex nesting scenarios
 // that GraphQL allows.
-func (j *jsonBuilder) flattenListStructure(arena *astjson.Arena, md *ListMetadata, data protoref.Message, message *RPCMessage) (*astjson.Value, error) {
+func (j *jsonBuilder) flattenListStructure(md *ListMetadata, data protoref.Message, message *RPCMessage) (*astjson.Value, error) {
 	if md == nil {
-		return arena.NewNull(), errors.New("list metadata not found")
+		return astjson.NullValue, errors.New("list metadata not found")
 	}
 
 	// Validate metadata consistency
 	if len(md.LevelInfo) < md.NestingLevel {
-		return arena.NewNull(), errors.New("nesting level data does not match the number of levels in the list metadata")
+		return astjson.NullValue, errors.New("nesting level data does not match the number of levels in the list metadata")
 	}
 
 	// Handle null data with proper nullability checking
 	if !data.IsValid() {
 		if md.LevelInfo[0].Optional {
-			return arena.NewNull(), nil
+			return astjson.NullValue, nil
 		}
 
-		return arena.NewNull(), errors.New("cannot add null item to response for non nullable list")
+		return astjson.NullValue, errors.New("cannot add null item to response for non nullable list")
 	}
 
 	// Start recursive traversal of the nested list structure
-	root := arena.NewArray()
-	return j.traverseList(0, arena, root, md, data, message)
+	root := astjson.ArrayValue(j.jsonArena)
+	return j.traverseList(0, root, md, data, message)
 }
 
 // traverseList recursively traverses nested list wrapper structures to extract the actual
 // list data. This handles multi-dimensional lists like [[String]] or [[[User]]] by
 // unwrapping the protobuf message wrappers at each level.
-func (j *jsonBuilder) traverseList(level int, arena *astjson.Arena, current *astjson.Value, md *ListMetadata, data protoref.Message, message *RPCMessage) (*astjson.Value, error) {
+func (j *jsonBuilder) traverseList(level int, current *astjson.Value, md *ListMetadata, data protoref.Message, message *RPCMessage) (*astjson.Value, error) {
 	if level > md.NestingLevel {
 		return current, nil
 	}
@@ -504,11 +389,11 @@ func (j *jsonBuilder) traverseList(level int, arena *astjson.Arena, current *ast
 	// List wrappers always use field number 1 in the generated protobuf
 	fd := data.Descriptor().Fields().ByNumber(1)
 	if fd == nil {
-		return arena.NewNull(), fmt.Errorf("field with number %d not found in message %q", 1, data.Descriptor().Name())
+		return astjson.NullValue, fmt.Errorf("field with number %d not found in message %q", 1, data.Descriptor().Name())
 	}
 
 	if fd.Kind() != protoref.MessageKind {
-		return arena.NewNull(), fmt.Errorf("field %q is not a message", fd.Name())
+		return astjson.NullValue, fmt.Errorf("field %q is not a message", fd.Name())
 	}
 
 	// Get the wrapper message containing the list
@@ -516,16 +401,16 @@ func (j *jsonBuilder) traverseList(level int, arena *astjson.Arena, current *ast
 	if !msg.IsValid() {
 		// Handle null wrapper based on nullability rules
 		if md.LevelInfo[level].Optional {
-			return arena.NewNull(), nil
+			return astjson.NullValue, nil
 		}
 
-		return arena.NewArray(), errors.New("cannot add null item to response for non nullable list")
+		return astjson.ArrayValue(j.jsonArena), errors.New("cannot add null item to response for non nullable list")
 	}
 
 	// The actual list is always at field number 1 in the wrapper
 	fd = msg.Descriptor().Fields().ByNumber(1)
 	if !fd.IsList() {
-		return arena.NewNull(), fmt.Errorf("field %q is not a list", fd.Name())
+		return astjson.NullValue, fmt.Errorf("field %q is not a list", fd.Name())
 	}
 
 	// Handle intermediate nesting levels (not the final level)
@@ -533,13 +418,13 @@ func (j *jsonBuilder) traverseList(level int, arena *astjson.Arena, current *ast
 		list := msg.Get(fd).List()
 		for i := 0; i < list.Len(); i++ {
 			// Create nested array for next level
-			next := arena.NewArray()
-			val, err := j.traverseList(level+1, arena, next, md, list.Get(i).Message(), message)
+			next := astjson.ArrayValue(j.jsonArena)
+			val, err := j.traverseList(level+1, next, md, list.Get(i).Message(), message)
 			if err != nil {
 				return nil, err
 			}
 
-			current.SetArrayItem(i, val)
+			current.SetArrayItem(j.jsonArena, i, val)
 		}
 
 		return current, nil
@@ -550,22 +435,22 @@ func (j *jsonBuilder) traverseList(level int, arena *astjson.Arena, current *ast
 	if !list.IsValid() {
 		// Invalid list at final level - return empty array
 		// Nullability is checked at the wrapper level, not the list level
-		return arena.NewArray(), nil
+		return astjson.ArrayValue(j.jsonArena), nil
 	}
 
 	// Process each item in the final list
 	for i := 0; i < list.Len(); i++ {
 		if message != nil {
 			// List of complex objects - recursively marshal each item
-			val, err := j.marshalResponseJSON(arena, message, list.Get(i).Message())
+			val, err := j.marshalResponseJSON(message, list.Get(i).Message())
 			if err != nil {
 				return nil, err
 			}
 
-			current.SetArrayItem(i, val)
+			current.SetArrayItem(j.jsonArena, i, val)
 		} else {
 			// List of scalar values - convert directly
-			j.setArrayItem(i, arena, current, list.Get(i), fd)
+			j.setArrayItem(i, current, list.Get(i), fd)
 		}
 	}
 
@@ -575,7 +460,7 @@ func (j *jsonBuilder) traverseList(level int, arena *astjson.Arena, current *ast
 // resolveOptionalField extracts the value from optional scalar wrapper types like
 // google.protobuf.StringValue, google.protobuf.Int32Value, etc. These wrappers
 // are used to represent nullable scalar values in protobuf.
-func (j *jsonBuilder) resolveOptionalField(arena *astjson.Arena, root *astjson.Value, name string, data protoref.Message) error {
+func (j *jsonBuilder) resolveOptionalField(root *astjson.Value, name string, data protoref.Message) error {
 	// Optional scalar wrappers always have a "value" field
 	fd := data.Descriptor().Fields().ByName(protoref.Name("value"))
 	if fd == nil {
@@ -583,16 +468,16 @@ func (j *jsonBuilder) resolveOptionalField(arena *astjson.Arena, root *astjson.V
 	}
 
 	// Extract and set the wrapped value
-	j.setJSONValue(arena, root, name, data, fd)
+	j.setJSONValue(root, name, data, fd)
 	return nil
 }
 
 // setJSONValue converts a protobuf field value to the appropriate JSON representation
 // and sets it on the provided JSON object. This handles all protobuf scalar types
 // and enum values with proper GraphQL mapping.
-func (j *jsonBuilder) setJSONValue(arena *astjson.Arena, root *astjson.Value, name string, data protoref.Message, fd protoref.FieldDescriptor) {
+func (j *jsonBuilder) setJSONValue(root *astjson.Value, name string, data protoref.Message, fd protoref.FieldDescriptor) {
 	if !data.IsValid() {
-		root.Set(name, arena.NewNull())
+		root.Set(j.jsonArena, name, astjson.NullValue)
 		return
 	}
 
@@ -600,27 +485,27 @@ func (j *jsonBuilder) setJSONValue(arena *astjson.Arena, root *astjson.Value, na
 	case protoref.BoolKind:
 		boolValue := data.Get(fd).Bool()
 		if boolValue {
-			root.Set(name, arena.NewTrue())
+			root.Set(j.jsonArena, name, astjson.TrueValue(j.jsonArena))
 		} else {
-			root.Set(name, arena.NewFalse())
+			root.Set(j.jsonArena, name, astjson.FalseValue(j.jsonArena))
 		}
 	case protoref.StringKind:
-		root.Set(name, arena.NewString(data.Get(fd).String()))
+		root.Set(j.jsonArena, name, astjson.StringValue(j.jsonArena, data.Get(fd).String()))
 	case protoref.Int32Kind:
-		root.Set(name, arena.NewNumberInt(int(data.Get(fd).Int())))
+		root.Set(j.jsonArena, name, astjson.IntValue(j.jsonArena, int(data.Get(fd).Int())))
 	case protoref.Int64Kind:
-		root.Set(name, arena.NewNumberString(strconv.FormatInt(data.Get(fd).Int(), 10)))
+		root.Set(j.jsonArena, name, astjson.NumberValue(j.jsonArena, strconv.FormatInt(data.Get(fd).Int(), 10)))
 	case protoref.Uint32Kind, protoref.Uint64Kind:
-		root.Set(name, arena.NewNumberString(strconv.FormatUint(data.Get(fd).Uint(), 10)))
+		root.Set(j.jsonArena, name, astjson.NumberValue(j.jsonArena, strconv.FormatUint(data.Get(fd).Uint(), 10)))
 	case protoref.FloatKind, protoref.DoubleKind:
-		root.Set(name, arena.NewNumberFloat64(data.Get(fd).Float()))
+		root.Set(j.jsonArena, name, astjson.FloatValue(j.jsonArena, data.Get(fd).Float()))
 	case protoref.BytesKind:
-		root.Set(name, arena.NewStringBytes(data.Get(fd).Bytes()))
+		root.Set(j.jsonArena, name, astjson.StringValueBytes(j.jsonArena, data.Get(fd).Bytes()))
 	case protoref.EnumKind:
 		enumDesc := fd.Enum()
 		enumValueDesc := enumDesc.Values().ByNumber(data.Get(fd).Enum())
 		if enumValueDesc == nil {
-			root.Set(name, arena.NewNull())
+			root.Set(j.jsonArena, name, astjson.NullValue)
 			return
 		}
 
@@ -628,20 +513,20 @@ func (j *jsonBuilder) setJSONValue(arena *astjson.Arena, root *astjson.Value, na
 		graphqlValue, ok := j.mapping.FindEnumValueMapping(string(enumDesc.Name()), string(enumValueDesc.Name()))
 		if !ok {
 			// No mapping found - set to null
-			root.Set(name, arena.NewNull())
+			root.Set(j.jsonArena, name, astjson.NullValue)
 			return
 		}
 
-		root.Set(name, arena.NewString(graphqlValue))
+		root.Set(j.jsonArena, name, astjson.StringValue(j.jsonArena, graphqlValue))
 	}
 }
 
 // setArrayItem converts a protobuf list item value to JSON and sets it at the specified
 // array index. This is similar to setJSONValue but operates on array elements rather
 // than object properties, and works with protobuf Value types rather than Message types.
-func (j *jsonBuilder) setArrayItem(index int, arena *astjson.Arena, array *astjson.Value, data protoref.Value, fd protoref.FieldDescriptor) {
+func (j *jsonBuilder) setArrayItem(index int, array *astjson.Value, data protoref.Value, fd protoref.FieldDescriptor) {
 	if !data.IsValid() {
-		array.SetArrayItem(index, arena.NewNull())
+		array.SetArrayItem(j.jsonArena, index, astjson.NullValue)
 		return
 	}
 
@@ -649,27 +534,27 @@ func (j *jsonBuilder) setArrayItem(index int, arena *astjson.Arena, array *astjs
 	case protoref.BoolKind:
 		boolValue := data.Bool()
 		if boolValue {
-			array.SetArrayItem(index, arena.NewTrue())
+			array.SetArrayItem(j.jsonArena, index, astjson.TrueValue(j.jsonArena))
 		} else {
-			array.SetArrayItem(index, arena.NewFalse())
+			array.SetArrayItem(j.jsonArena, index, astjson.FalseValue(j.jsonArena))
 		}
 	case protoref.StringKind:
-		array.SetArrayItem(index, arena.NewString(data.String()))
+		array.SetArrayItem(j.jsonArena, index, astjson.StringValue(j.jsonArena, data.String()))
 	case protoref.Int32Kind:
-		array.SetArrayItem(index, arena.NewNumberInt(int(data.Int())))
+		array.SetArrayItem(j.jsonArena, index, astjson.IntValue(j.jsonArena, int(data.Int())))
 	case protoref.Int64Kind:
-		array.SetArrayItem(index, arena.NewNumberString(strconv.FormatInt(data.Int(), 10)))
+		array.SetArrayItem(j.jsonArena, index, astjson.NumberValue(j.jsonArena, strconv.FormatInt(data.Int(), 10)))
 	case protoref.Uint32Kind, protoref.Uint64Kind:
-		array.SetArrayItem(index, arena.NewNumberString(strconv.FormatUint(data.Uint(), 10)))
+		array.SetArrayItem(j.jsonArena, index, astjson.NumberValue(j.jsonArena, strconv.FormatUint(data.Uint(), 10)))
 	case protoref.FloatKind, protoref.DoubleKind:
-		array.SetArrayItem(index, arena.NewNumberFloat64(data.Float()))
+		array.SetArrayItem(j.jsonArena, index, astjson.FloatValue(j.jsonArena, data.Float()))
 	case protoref.BytesKind:
-		array.SetArrayItem(index, arena.NewStringBytes(data.Bytes()))
+		array.SetArrayItem(j.jsonArena, index, astjson.StringValueBytes(j.jsonArena, data.Bytes()))
 	case protoref.EnumKind:
 		enumDesc := fd.Enum()
 		enumValueDesc := enumDesc.Values().ByNumber(data.Enum())
 		if enumValueDesc == nil {
-			array.SetArrayItem(index, arena.NewNull())
+			array.SetArrayItem(j.jsonArena, index, astjson.NullValue)
 			return
 		}
 
@@ -677,20 +562,19 @@ func (j *jsonBuilder) setArrayItem(index int, arena *astjson.Arena, array *astjs
 		graphqlValue, ok := j.mapping.FindEnumValueMapping(string(enumDesc.Name()), string(enumValueDesc.Name()))
 		if !ok {
 			// No mapping found - use null
-			array.SetArrayItem(index, arena.NewNull())
+			array.SetArrayItem(j.jsonArena, index, astjson.NullValue)
 			return
 		}
 
-		array.SetArrayItem(index, arena.NewString(graphqlValue))
+		array.SetArrayItem(j.jsonArena, index, astjson.StringValue(j.jsonArena, graphqlValue))
 	}
 }
 
 // toDataObject wraps a response value in the standard GraphQL data envelope.
 // This creates the top-level structure { "data": ... } that GraphQL clients expect.
 func (j *jsonBuilder) toDataObject(root *astjson.Value) *astjson.Value {
-	a := astjson.Arena{}
-	data := a.NewObject()
-	data.Set(dataPath, root)
+	data := astjson.ObjectValue(j.jsonArena)
+	data.Set(j.jsonArena, dataPath, root)
 	return data
 }
 
@@ -698,30 +582,27 @@ func (j *jsonBuilder) toDataObject(root *astjson.Value) *astjson.Value {
 // This includes the error message and gRPC status code information in the extensions
 // field, following GraphQL error specification standards.
 func (j *jsonBuilder) writeErrorBytes(err error) []byte {
-	a := astjson.Arena{}
-	defer a.Reset()
-
 	// Create standard GraphQL error structure
-	errorRoot := a.NewObject()
-	errorArray := a.NewArray()
-	errorRoot.Set(errorsPath, errorArray)
+	errorRoot := astjson.ObjectValue(j.jsonArena)
+	errorArray := astjson.ArrayValue(j.jsonArena)
+	errorRoot.Set(j.jsonArena, errorsPath, errorArray)
 
 	// Create individual error object
-	errorItem := a.NewObject()
-	errorItem.Set("message", a.NewString(err.Error()))
+	errorItem := astjson.ObjectValue(j.jsonArena)
+	errorItem.Set(j.jsonArena, "message", astjson.StringValue(j.jsonArena, err.Error()))
 
 	// Add gRPC status code information to extensions
-	extensions := a.NewObject()
+	extensions := astjson.ObjectValue(j.jsonArena)
 	if st, ok := status.FromError(err); ok {
 		// gRPC error - include the specific status code
-		extensions.Set("code", a.NewString(st.Code().String()))
+		extensions.Set(j.jsonArena, "code", astjson.StringValue(j.jsonArena, st.Code().String()))
 	} else {
 		// Generic error - default to INTERNAL status
-		extensions.Set("code", a.NewString(codes.Internal.String()))
+		extensions.Set(j.jsonArena, "code", astjson.StringValue(j.jsonArena, codes.Internal.String()))
 	}
 
-	errorItem.Set("extensions", extensions)
-	errorArray.SetArrayItem(0, errorItem)
+	errorItem.Set(j.jsonArena, "extensions", extensions)
+	errorArray.SetArrayItem(j.jsonArena, 0, errorItem)
 
 	return errorRoot.MarshalTo(nil)
 }

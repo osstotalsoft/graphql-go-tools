@@ -3,7 +3,10 @@ package astvisitor
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"sync"
+
+	"github.com/wundergraph/go-arena"
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/lexer/literal"
@@ -17,22 +20,17 @@ var (
 
 type SkipVisitors []int
 
-func (s SkipVisitors) Allow(planner interface{}) bool {
+func (s SkipVisitors) Allow(planner any) bool {
 	p, ok := planner.(VisitorIdentifier)
 	if !ok {
 		return true
 	}
 	currentID := p.ID()
 
-	for _, skippedID := range s {
-		if skippedID == currentID {
-			return false
-		}
-	}
-	return true
+	return !slices.Contains(s, currentID)
 }
 
-func newSkipVisitors(skips []int, planner interface{}, allowedToVisit bool) SkipVisitors {
+func newSkipVisitors(skips []int, planner any, allowedToVisit bool) SkipVisitors {
 	p, ok := planner.(VisitorIdentifier)
 	if !ok {
 		return skips
@@ -95,6 +93,8 @@ type Walker struct {
 	deferred        []func()
 
 	OnExternalError func(err *operationreport.ExternalError)
+
+	arena arena.Arena
 }
 
 func NewWalkerWithID(ancestorSize int, id string) Walker {
@@ -140,6 +140,9 @@ func WalkerFromPool() *Walker {
 }
 
 func (w *Walker) Release() {
+	if w.arena != nil {
+		w.arena.Reset()
+	}
 	w.ResetVisitors()
 	w.Report = nil
 	w.document = nil
@@ -716,7 +719,7 @@ type (
 	}
 	// VisitorFilter can be defined to prevent specific visitors from getting invoked
 	VisitorFilter interface {
-		AllowVisitor(kind VisitorKind, ref int, visitor interface{}, ancestorSkip SkipVisitors) bool
+		AllowVisitor(kind VisitorKind, ref int, visitor any, ancestorSkip SkipVisitors) bool
 	}
 
 	VisitorIdentifier interface {
@@ -1391,6 +1394,11 @@ func (w *Walker) Walk(document, definition *ast.Document, report *operationrepor
 	} else {
 		w.Report = report
 	}
+	if w.arena == nil {
+		w.arena = arena.NewMonotonicArena(arena.WithMinBufferSize(64))
+	} else {
+		w.arena.Reset()
+	}
 	w.Ancestors = w.Ancestors[:0]
 	w.Path = w.Path[:0]
 	w.TypeDefinitions = w.TypeDefinitions[:0]
@@ -1843,8 +1851,7 @@ func (w *Walker) walkSelectionSet(ref int, skipFor SkipVisitors) {
 
 RefsChanged:
 	for {
-		refs := make([]int, 0, len(w.document.SelectionSets[ref].SelectionRefs))
-		refs = append(refs, w.document.SelectionSets[ref].SelectionRefs...)
+		refs := arena.SliceAppend(w.arena, nil, w.document.SelectionSets[ref].SelectionRefs...)
 
 		for i, j := range refs {
 
@@ -4032,15 +4039,15 @@ func (w *Walker) InRootField() bool {
 // an inline fragment.
 // It returns the inline fragment ref and true if the current field is inside of an inline fragment.
 // It returns -1 and false if the current field is not inside of an inline fragment.
-func (w *Walker) ResolveInlineFragment() (int, bool) {
+func (w *Walker) ResolveInlineFragment() int {
 	if len(w.Ancestors) < 2 {
-		return ast.InvalidRef, false
+		return ast.InvalidRef
 	}
 
 	node := w.Ancestors[len(w.Ancestors)-2]
 	if node.Kind != ast.NodeKindInlineFragment {
-		return ast.InvalidRef, false
+		return ast.InvalidRef
 	}
 
-	return node.Ref, true
+	return node.Ref
 }

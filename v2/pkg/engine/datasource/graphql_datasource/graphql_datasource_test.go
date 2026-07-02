@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cespare/xxhash/v2"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
+	"github.com/wundergraph/graphql-go-tools/v2/pkg/astvalidation"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/httpclient"
 	. "github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasourcetesting"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/plan"
@@ -3993,8 +3993,7 @@ func TestGraphQLDataSource(t *testing.T) {
 			DefaultFlushIntervalMillis:   500,
 		}, WithDefaultPostProcessor()))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	t.Run("Subscription", func(t *testing.T) {
 		t.Run("Subscription", runTestOnTestDefinition(t, `
@@ -4006,9 +4005,11 @@ func TestGraphQLDataSource(t *testing.T) {
 				Trigger: resolve.GraphQLSubscriptionTrigger{
 					Input: []byte(`{"url":"wss://swapi.com/graphql","body":{"query":"subscription{remainingJedis}"}}`),
 					Source: &SubscriptionSource{
-						client: NewGraphQLSubscriptionClient(http.DefaultClient, http.DefaultClient, ctx),
+						client: NewGraphQLSubscriptionClient(ctx),
 					},
 					PostProcessing: DefaultPostProcessingConfiguration,
+					SourceName:     "ds-id",
+					SourceID:       "ds-id",
 				},
 				Response: &resolve.GraphQLResponse{
 					Fetches: resolve.Sequence(),
@@ -4047,9 +4048,11 @@ func TestGraphQLDataSource(t *testing.T) {
 					},
 				),
 				Source: &SubscriptionSource{
-					client: NewGraphQLSubscriptionClient(http.DefaultClient, http.DefaultClient, ctx),
+					client: NewGraphQLSubscriptionClient(ctx),
 				},
 				PostProcessing: DefaultPostProcessingConfiguration,
+				SourceName:     "ds-id",
+				SourceID:       "ds-id",
 			},
 			Response: &resolve.GraphQLResponse{
 				Data: &resolve.Object{
@@ -8228,6 +8231,138 @@ func TestGraphQLDataSource(t *testing.T) {
 		},
 		DisableResolveFieldPositions: true,
 	}, WithDefaultPostProcessor()))
+
+	t.Run("inline fragments on non-overlapping types with different field nullability", func(t *testing.T) {
+		definition := `
+			scalar String
+			scalar Int
+			scalar ID
+
+			interface Node {
+				id: ID!
+			}
+
+			type User implements Node {
+				id: ID!
+				email: String!
+				profile: Profile!
+			}
+
+			type Organization implements Node {
+				id: ID!
+				email: String
+				profile: Profile
+			}
+
+			type Profile {
+				name: String
+			}
+
+			union Entity = User | Organization
+
+			type Query {
+				entity: Entity
+			}
+
+			schema {
+				query: Query
+			}
+		`
+
+		t.Run("run", RunTest(definition, `
+			query MyQuery {
+				entity {
+					... on User { email }
+					... on Organization { email }
+				}
+			}`,
+			"MyQuery",
+			&plan.SynchronousResponsePlan{
+				Response: &resolve.GraphQLResponse{
+					Fetches: resolve.Sequence(
+						resolve.Single(&resolve.SingleFetch{
+							FetchConfiguration: resolve.FetchConfiguration{
+								DataSource:     &Source{},
+								Input:          `{"method":"POST","url":"https://example.com/graphql","body":{"query":"{entity {__typename ... on User {email} ... on Organization {email}}}"}}`,
+								PostProcessing: DefaultPostProcessingConfiguration,
+							},
+							DataSourceIdentifier: []byte("graphql_datasource.Source"),
+						})),
+					Data: &resolve.Object{
+						Fields: []*resolve.Field{
+							{
+								Name: []byte("entity"),
+								Value: &resolve.Object{
+									Path:     []string{"entity"},
+									Nullable: true,
+									PossibleTypes: map[string]struct{}{
+										"User":         {},
+										"Organization": {},
+									},
+									TypeName: "Entity",
+									Fields: []*resolve.Field{
+										{
+											Name: []byte("email"),
+											Value: &resolve.String{
+												Path: []string{"email"},
+											},
+											OnTypeNames: [][]byte{[]byte("User")},
+										},
+										{
+											Name: []byte("email"),
+											Value: &resolve.String{
+												Path:     []string{"email"},
+												Nullable: true,
+											},
+											OnTypeNames: [][]byte{[]byte("Organization")},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			}, plan.Configuration{
+				DataSources: []plan.DataSource{
+					mustDataSourceConfiguration(
+						t,
+						"ds-id",
+						&plan.DataSourceMetadata{
+							RootNodes: []plan.TypeField{
+								{
+									TypeName:   "Query",
+									FieldNames: []string{"entity"},
+								},
+							},
+							ChildNodes: []plan.TypeField{
+								{
+									TypeName:   "User",
+									FieldNames: []string{"id", "email", "profile"},
+								},
+								{
+									TypeName:   "Organization",
+									FieldNames: []string{"id", "email", "profile"},
+								},
+								{
+									TypeName:   "Profile",
+									FieldNames: []string{"name"},
+								},
+							},
+						},
+						mustCustomConfiguration(t, ConfigurationInput{
+							Fetch: &FetchConfiguration{
+								URL: "https://example.com/graphql",
+							},
+							SchemaConfiguration: mustSchema(t, nil, definition),
+						}),
+					),
+				},
+				DisableResolveFieldPositions:                           true,
+				RelaxSubgraphOperationFieldSelectionMergingNullability: true,
+			}, WithDefaultPostProcessor(),
+			WithValidationOptions(astvalidation.WithRelaxFieldSelectionMergingNullability()),
+		))
+	})
 }
 
 var errSubscriptionClientFail = errors.New("subscription client fail error")
@@ -8245,105 +8380,34 @@ func (f *FailingSubscriptionClient) Subscribe(ctx *resolve.Context, options Grap
 	return errSubscriptionClientFail
 }
 
-func (f *FailingSubscriptionClient) UniqueRequestID(ctx *resolve.Context, options GraphQLSubscriptionOptions, hash *xxhash.Digest) (err error) {
-	return errSubscriptionClientFail
-}
-
-type testSubscriptionUpdaterChan struct {
-	updates  chan string
-	complete chan struct{}
-	closed   chan resolve.SubscriptionCloseKind
-}
-
-func newTestSubscriptionUpdaterChan() *testSubscriptionUpdaterChan {
-	return &testSubscriptionUpdaterChan{
-		updates:  make(chan string),
-		complete: make(chan struct{}),
-		closed:   make(chan resolve.SubscriptionCloseKind),
-	}
-}
-
-func (t *testSubscriptionUpdaterChan) Heartbeat() {
-	t.updates <- "{}"
-}
-
-func (t *testSubscriptionUpdaterChan) Update(data []byte) {
-	t.updates <- string(data)
-}
-
-// empty method to satisfy the interface, not used in this tests
-func (t *testSubscriptionUpdaterChan) UpdateSubscription(id resolve.SubscriptionIdentifier, data []byte) {
-}
-
-// empty method to satisfy the interface, not used in this tests
-func (t *testSubscriptionUpdaterChan) CloseSubscription(kind resolve.SubscriptionCloseKind, id resolve.SubscriptionIdentifier) {
-}
-
-// empty method to satisfy the interface, not used in this tests
-func (t *testSubscriptionUpdaterChan) Subscriptions() map[context.Context]resolve.SubscriptionIdentifier {
-	return make(map[context.Context]resolve.SubscriptionIdentifier)
-}
-
-func (t *testSubscriptionUpdaterChan) Complete() {
-	close(t.complete)
-}
-
-func (t *testSubscriptionUpdaterChan) Close(kind resolve.SubscriptionCloseKind) {
-	t.closed <- kind
-}
-
-func (t *testSubscriptionUpdaterChan) AwaitUpdateWithT(tt *testing.T, timeout time.Duration, f func(t *testing.T, update string), msgAndArgs ...any) {
-	tt.Helper()
-
-	select {
-	case args := <-t.updates:
-		f(tt, args)
-	case <-time.After(timeout):
-		require.Fail(tt, "unable to receive update before timeout", msgAndArgs...)
-	}
-}
-
-func (t *testSubscriptionUpdaterChan) AwaitClose(tt *testing.T, timeout time.Duration, msgAndArgs ...any) {
-	tt.Helper()
-
-	select {
-	case <-t.closed:
-	case <-time.After(timeout):
-		require.Fail(tt, "updater not closed before timeout", msgAndArgs...)
-	}
-}
-
-func (t *testSubscriptionUpdaterChan) AwaitCloseKind(tt *testing.T, timeout time.Duration, expectedCloseKind resolve.SubscriptionCloseKind, msgAndArgs ...any) {
-	tt.Helper()
-
-	select {
-	case closeKind := <-t.closed:
-		require.Equal(tt, expectedCloseKind, closeKind, msgAndArgs...)
-	case <-time.After(timeout):
-		require.Fail(tt, "updater not closed before timeout", msgAndArgs...)
-	}
-}
-
-func (t *testSubscriptionUpdaterChan) AwaitComplete(tt *testing.T, timeout time.Duration, msgAndArgs ...any) {
-	tt.Helper()
-
-	select {
-	case <-t.complete:
-	case <-time.After(timeout):
-		require.Fail(tt, "updater not completed before timeout", msgAndArgs...)
-	}
-}
-
 // !! If you see this in a test you're working on, please replace it with the new testSubscriptionUpdaterChan
 // It's faster, more ergonomic and more reliable. See SSE handler tests for usage examples.
 type testSubscriptionUpdater struct {
 	updates []string
+	errors  []string
 	done    bool
-	closed  bool
 	mux     sync.Mutex
 }
 
 func (t *testSubscriptionUpdater) AwaitUpdates(tt *testing.T, timeout time.Duration, count int) {
+	tt.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for {
+		t.mux.Lock()
+		got := len(t.updates)
+		t.mux.Unlock()
+		if got == count {
+			return
+		}
+		if time.Now().After(deadline) {
+			tt.Fatalf("timed out waiting for updates: got %d, want %d", got, count)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func (t *testSubscriptionUpdater) AwaitErrors(tt *testing.T, timeout time.Duration, count int) {
 	tt.Helper()
 
 	ticker := time.NewTicker(timeout)
@@ -8352,10 +8416,10 @@ func (t *testSubscriptionUpdater) AwaitUpdates(tt *testing.T, timeout time.Durat
 		time.Sleep(10 * time.Millisecond)
 		select {
 		case <-ticker.C:
-			tt.Fatalf("timed out waiting for updates")
+			tt.Fatalf("timed out waiting for errors")
 		default:
 			t.mux.Lock()
-			if len(t.updates) == count {
+			if len(t.errors) == count {
 				t.mux.Unlock()
 				return
 			}
@@ -8367,21 +8431,18 @@ func (t *testSubscriptionUpdater) AwaitUpdates(tt *testing.T, timeout time.Durat
 func (t *testSubscriptionUpdater) AwaitDone(tt *testing.T, timeout time.Duration) {
 	tt.Helper()
 
-	ticker := time.NewTicker(timeout)
-	defer ticker.Stop()
+	deadline := time.Now().Add(timeout)
 	for {
-		time.Sleep(10 * time.Millisecond)
-		select {
-		case <-ticker.C:
-			tt.Fatalf("timed out waiting for done")
-		default:
-			t.mux.Lock()
-			if t.done {
-				t.mux.Unlock()
-				return
-			}
-			t.mux.Unlock()
+		t.mux.Lock()
+		isDone := t.done
+		t.mux.Unlock()
+		if isDone {
+			return
 		}
+		if time.Now().After(deadline) {
+			tt.Fatalf("timed out waiting for done")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -8403,14 +8464,20 @@ func (t *testSubscriptionUpdater) Complete() {
 	t.done = true
 }
 
-func (t *testSubscriptionUpdater) Close(kind resolve.SubscriptionCloseKind) {
+func (t *testSubscriptionUpdater) Error(data []byte) {
 	t.mux.Lock()
 	defer t.mux.Unlock()
-	t.closed = true
+	t.errors = append(t.errors, string(data))
+}
+
+func (t *testSubscriptionUpdater) Done() {
+	t.mux.Lock()
+	defer t.mux.Unlock()
+	t.done = true
 }
 
 // empty method to satisfy the interface, not used in this tests
-func (t *testSubscriptionUpdater) CloseSubscription(kind resolve.SubscriptionCloseKind, id resolve.SubscriptionIdentifier) {
+func (t *testSubscriptionUpdater) CloseSubscription(id resolve.SubscriptionIdentifier) {
 }
 
 // empty method to satisfy the interface, not used in this tests
@@ -8459,20 +8526,19 @@ func TestSubscriptionSource_Start(t *testing.T) {
 	}
 
 	newSubscriptionSource := func(ctx context.Context) SubscriptionSource {
-		httpClient := http.Client{}
-		subscriptionSource := SubscriptionSource{client: NewGraphQLSubscriptionClient(&httpClient, http.DefaultClient, ctx)}
+		subscriptionSource := SubscriptionSource{client: NewGraphQLSubscriptionClient(ctx)}
 		return subscriptionSource
 	}
 
 	t.Run("should return error when input is invalid", func(t *testing.T) {
 		source := SubscriptionSource{client: &FailingSubscriptionClient{}}
-		err := source.Start(resolve.NewContext(context.Background()), []byte(`{"url": "", "body": "", "header": null}`), nil)
+		err := source.Start(resolve.NewContext(context.Background()), nil, []byte(`{"url": "", "body": "", "header": null}`), nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("should return error when subscription client returns an error", func(t *testing.T) {
 		source := SubscriptionSource{client: &FailingSubscriptionClient{}}
-		err := source.Start(resolve.NewContext(context.Background()), []byte(`{"url": "", "body": {}, "header": null}`), nil)
+		err := source.Start(resolve.NewContext(context.Background()), nil, []byte(`{"url": "", "body": {}, "header": null}`), nil)
 		assert.Error(t, err)
 		assert.Equal(t, resolve.ErrUnableToResolve, err)
 	})
@@ -8485,7 +8551,7 @@ func TestSubscriptionSource_Start(t *testing.T) {
 
 		source := newSubscriptionSource(ctx.Context())
 		chatSubscriptionOptions := chatServerSubscriptionOptions(t, `{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomName: "#test") { text createdBy } }"}`)
-		err := source.Start(ctx, chatSubscriptionOptions, updater)
+		err := source.Start(ctx, nil, chatSubscriptionOptions, updater)
 		require.ErrorIs(t, err, resolve.ErrUnableToResolve)
 	})
 
@@ -8497,25 +8563,24 @@ func TestSubscriptionSource_Start(t *testing.T) {
 
 		source := newSubscriptionSource(ctx.Context())
 		chatSubscriptionOptions := chatServerSubscriptionOptions(t, `{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomNam: \"#test\") { text createdBy } }"}`)
-		err := source.Start(ctx, chatSubscriptionOptions, updater)
+		err := source.Start(ctx, nil, chatSubscriptionOptions, updater)
 		require.NoError(t, err)
-		updater.AwaitUpdates(t, time.Second, 1)
-		assert.Len(t, updater.updates, 1)
-		assert.Equal(t, `{"errors":[{"message":"Unknown argument \"roomNam\" on field \"Subscription.messageAdded\". Did you mean \"roomName\"?","locations":[{"line":1,"column":29}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}},{"message":"Field \"messageAdded\" argument \"roomName\" of type \"String!\" is required, but it was not provided.","locations":[{"line":1,"column":29}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}]}`, updater.updates[0])
+		updater.AwaitErrors(t, time.Second, 1)
+		assert.Len(t, updater.errors, 1)
+		assert.Equal(t, `{"errors":[{"message":"Unknown argument \"roomNam\" on field \"Subscription.messageAdded\". Did you mean \"roomName\"?","locations":[{"line":1,"column":29}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}},{"message":"Field \"messageAdded\" argument \"roomName\" of type \"String!\" is required, but it was not provided.","locations":[{"line":1,"column":29}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}]}`, updater.errors[0])
 		updater.AwaitDone(t, time.Second)
 	})
 
 	t.Run("should close connection on stop message", func(t *testing.T) {
 		subscriptionLifecycle, cancelSubscription := context.WithCancel(context.Background())
-		resolverLifecycle, cancelResolver := context.WithCancel(context.Background())
-		defer cancelResolver()
+		resolverLifecycle := t.Context()
 
 		updater := &testSubscriptionUpdater{}
 
 		source := newSubscriptionSource(resolverLifecycle)
 		chatSubscriptionOptions := chatServerSubscriptionOptions(t, `{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomName: \"#test\") { text createdBy } }"}`)
 
-		err := source.Start(resolve.NewContext(subscriptionLifecycle), chatSubscriptionOptions, updater)
+		err := source.Start(resolve.NewContext(subscriptionLifecycle), nil, chatSubscriptionOptions, updater)
 		require.NoError(t, err)
 
 		username := "myuser"
@@ -8538,7 +8603,7 @@ func TestSubscriptionSource_Start(t *testing.T) {
 		source := newSubscriptionSource(ctx.Context())
 		chatSubscriptionOptions := chatServerSubscriptionOptions(t, `{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomName: \"#test\") { text createdBy } }"}`)
 
-		err := source.Start(ctx, chatSubscriptionOptions, updater)
+		err := source.Start(ctx, nil, chatSubscriptionOptions, updater)
 		require.NoError(t, err)
 
 		username := "myuser"
@@ -8587,9 +8652,8 @@ func TestSubscription_GTWS_SubProtocol(t *testing.T) {
 	}
 
 	newSubscriptionSource := func(ctx context.Context) SubscriptionSource {
-		httpClient := http.Client{}
 		subscriptionSource := SubscriptionSource{
-			client: NewGraphQLSubscriptionClient(&httpClient, http.DefaultClient, ctx),
+			client: NewGraphQLSubscriptionClient(ctx),
 		}
 		return subscriptionSource
 	}
@@ -8602,27 +8666,26 @@ func TestSubscription_GTWS_SubProtocol(t *testing.T) {
 
 		source := newSubscriptionSource(ctx.Context())
 		chatSubscriptionOptions := chatServerSubscriptionOptions(t, `{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomNam: \"#test\") { text createdBy } }"}`)
-		err := source.Start(ctx, chatSubscriptionOptions, updater)
+		err := source.Start(ctx, nil, chatSubscriptionOptions, updater)
 		require.NoError(t, err)
 
-		updater.AwaitUpdates(t, time.Second, 1)
-		assert.Len(t, updater.updates, 1)
-		assert.Equal(t, `{"errors":[{"message":"Unknown argument \"roomNam\" on field \"Subscription.messageAdded\". Did you mean \"roomName\"?","locations":[{"line":1,"column":29}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}},{"message":"Field \"messageAdded\" argument \"roomName\" of type \"String!\" is required, but it was not provided.","locations":[{"line":1,"column":29}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}]}`, updater.updates[0])
+		updater.AwaitErrors(t, time.Second, 1)
+		assert.Len(t, updater.errors, 1)
+		assert.Equal(t, `{"errors":[{"message":"Unknown argument \"roomNam\" on field \"Subscription.messageAdded\". Did you mean \"roomName\"?","locations":[{"line":1,"column":29}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}},{"message":"Field \"messageAdded\" argument \"roomName\" of type \"String!\" is required, but it was not provided.","locations":[{"line":1,"column":29}],"extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}]}`, updater.errors[0])
 		updater.AwaitDone(t, time.Second)
 		assert.Equal(t, true, updater.done)
 	})
 
 	t.Run("should close connection on stop message", func(t *testing.T) {
 		subscriptionLifecycle, cancelSubscription := context.WithCancel(context.Background())
-		resolverLifecycle, cancelResolver := context.WithCancel(context.Background())
-		defer cancelResolver()
+		resolverLifecycle := t.Context()
 
 		updater := &testSubscriptionUpdater{}
 
 		source := newSubscriptionSource(resolverLifecycle)
 		chatSubscriptionOptions := chatServerSubscriptionOptions(t, `{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomName: \"#test\") { text createdBy } }"}`)
 
-		err := source.Start(resolve.NewContext(subscriptionLifecycle), chatSubscriptionOptions, updater)
+		err := source.Start(resolve.NewContext(subscriptionLifecycle), nil, chatSubscriptionOptions, updater)
 		require.NoError(t, err)
 
 		username := "myuser"
@@ -8646,7 +8709,7 @@ func TestSubscription_GTWS_SubProtocol(t *testing.T) {
 		source := newSubscriptionSource(ctx.Context())
 		chatSubscriptionOptions := chatServerSubscriptionOptions(t, `{"variables": {}, "extensions": {}, "operationName": "LiveMessages", "query": "subscription LiveMessages { messageAdded(roomName: \"#test\") { text createdBy } }"}`)
 
-		err := source.Start(ctx, chatSubscriptionOptions, updater)
+		err := source.Start(ctx, nil, chatSubscriptionOptions, updater)
 		require.NoError(t, err)
 
 		username := "myuser"
@@ -8784,10 +8847,9 @@ func TestSource_Load(t *testing.T) {
 			input = httpclient.SetInputBodyWithPath(input, variables, "variables")
 			input = httpclient.SetInputURL(input, []byte(serverUrl))
 
-			buf := bytes.NewBuffer(nil)
-
-			require.NoError(t, src.Load(context.Background(), input, buf))
-			assert.Equal(t, `{"variables":{"a":null,"b":"b","c":{}}}`, buf.String())
+			data, err := src.Load(context.Background(), nil, input)
+			require.NoError(t, err)
+			assert.Equal(t, `{"variables":{"a":null,"b":"b","c":{}}}`, string(data))
 		})
 	})
 	t.Run("remove undefined variables", func(t *testing.T) {
@@ -8800,7 +8862,6 @@ func TestSource_Load(t *testing.T) {
 			var input []byte
 			input = httpclient.SetInputBodyWithPath(input, variables, "variables")
 			input = httpclient.SetInputURL(input, []byte(serverUrl))
-			buf := bytes.NewBuffer(nil)
 
 			undefinedVariables := []string{"a", "c"}
 			ctx := context.Background()
@@ -8808,8 +8869,9 @@ func TestSource_Load(t *testing.T) {
 			input, err = httpclient.SetUndefinedVariables(input, undefinedVariables)
 			assert.NoError(t, err)
 
-			require.NoError(t, src.Load(ctx, input, buf))
-			assert.Equal(t, `{"variables":{"b":null}}`, buf.String())
+			data, err := src.Load(ctx, nil, input)
+			require.NoError(t, err)
+			assert.Equal(t, `{"variables":{"b":null}}`, string(data))
 		})
 	})
 }
@@ -8891,10 +8953,12 @@ func TestLoadFiles(t *testing.T) {
 		input = httpclient.SetInputBodyWithPath(input, variables, "variables")
 		input = httpclient.SetInputBodyWithPath(input, query, "query")
 		input = httpclient.SetInputURL(input, []byte(serverUrl))
-		buf := bytes.NewBuffer(nil)
 
 		ctx := context.Background()
-		require.NoError(t, src.LoadWithFiles(ctx, input, []*httpclient.FileUpload{httpclient.NewFileUpload(f.Name(), fileName, "variables.file")}, buf))
+		got, err := src.LoadWithFiles(ctx, nil, input, []*httpclient.FileUpload{httpclient.NewFileUpload(f.Name(), fileName, "variables.file")})
+		require.NoError(t, err)
+		require.Equal(t, []byte{}, got)
+
 	})
 
 	t.Run("multiple files", func(t *testing.T) {
@@ -8935,7 +8999,6 @@ func TestLoadFiles(t *testing.T) {
 		input = httpclient.SetInputBodyWithPath(input, variables, "variables")
 		input = httpclient.SetInputBodyWithPath(input, query, "query")
 		input = httpclient.SetInputURL(input, []byte(serverUrl))
-		buf := bytes.NewBuffer(nil)
 
 		dir := t.TempDir()
 		f1, err := os.CreateTemp(dir, file1Name)
@@ -8949,11 +9012,12 @@ func TestLoadFiles(t *testing.T) {
 		assert.NoError(t, err)
 
 		ctx := context.Background()
-		require.NoError(t, src.LoadWithFiles(ctx, input,
+		got, err := src.LoadWithFiles(ctx, nil, input,
 			[]*httpclient.FileUpload{
 				httpclient.NewFileUpload(f1.Name(), file1Name, "variables.files.0"),
-				httpclient.NewFileUpload(f2.Name(), file2Name, "variables.files.1")},
-			buf))
+				httpclient.NewFileUpload(f2.Name(), file2Name, "variables.files.1")})
+		require.NoError(t, err)
+		require.Equal(t, []byte{}, got)
 	})
 }
 
@@ -8987,7 +9051,6 @@ func TestSanitizeKey(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, test.expected, sanitizeKey(test.input))

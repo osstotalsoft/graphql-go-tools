@@ -8,6 +8,7 @@ import (
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astparser"
+	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/plan"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/operationreport"
 )
@@ -20,10 +21,10 @@ const (
 type OperationType ast.OperationType
 
 const (
-	OperationTypeUnknown      OperationType = OperationType(ast.OperationTypeUnknown)
-	OperationTypeQuery        OperationType = OperationType(ast.OperationTypeQuery)
-	OperationTypeMutation     OperationType = OperationType(ast.OperationTypeMutation)
-	OperationTypeSubscription OperationType = OperationType(ast.OperationTypeSubscription)
+	OperationTypeUnknown      = OperationType(ast.OperationTypeUnknown)
+	OperationTypeQuery        = OperationType(ast.OperationTypeQuery)
+	OperationTypeMutation     = OperationType(ast.OperationTypeMutation)
+	OperationTypeSubscription = OperationType(ast.OperationTypeSubscription)
 )
 
 var (
@@ -42,6 +43,9 @@ type Request struct {
 	request      resolve.Request
 
 	validForSchema map[uint64]ValidationResult
+
+	estimatedCost int
+	actualCost    int
 }
 
 func UnmarshalRequest(reader io.Reader, request *Request) error {
@@ -188,4 +192,32 @@ func (r *Request) OperationType() (OperationType, error) {
 	}
 
 	return OperationTypeUnknown, nil
+}
+
+func (r *Request) ComputeEstimatedCost(calc *plan.CostCalculator, vars resolve.VariablesView) {
+	if calc != nil {
+		r.estimatedCost = calc.EstimateCost(vars)
+		// Debugging of cost trees. Uncomment to debug.
+		// fmt.Println(calc.DebugPrint(vars, nil))
+	} else {
+		r.estimatedCost = 0
+	}
+}
+
+func (r *Request) EstimatedCost() int {
+	return r.estimatedCost
+}
+
+func (r *Request) ComputeActualCost(calc *plan.CostCalculator, vars resolve.VariablesView, typeStats map[string]resolve.TypeNameStats) {
+	if calc != nil {
+		r.actualCost = calc.ActualCost(vars, typeStats)
+		// Debugging of cost trees. Uncomment to debug.
+		// fmt.Println(calc.DebugPrint(vars, typeStats))
+	} else {
+		r.actualCost = 0
+	}
+}
+
+func (r *Request) ActualCost() int {
+	return r.actualCost
 }

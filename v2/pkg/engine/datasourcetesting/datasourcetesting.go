@@ -12,8 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/wundergraph/astjson"
-
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astnormalization"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astprinter"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/asttransform"
@@ -34,6 +32,7 @@ type testOptions struct {
 	withPrintPlan         bool
 	withFieldDependencies bool
 	withFetchReasons      bool
+	validationOptions     []astvalidation.Option
 }
 
 func WithPostProcessors(postProcessors ...*postprocess.Processor) func(*testOptions) {
@@ -81,6 +80,12 @@ func WithFetchReasons() func(*testOptions) {
 		o.withFieldInfo = true
 		o.withFieldDependencies = true
 		o.withFetchReasons = true
+	}
+}
+
+func WithValidationOptions(options ...astvalidation.Option) func(*testOptions) {
+	return func(o *testOptions) {
+		o.validationOptions = options
 	}
 }
 
@@ -181,7 +186,7 @@ func RunTestWithVariables(definition, operation, operationName, variables string
 		normalized := unsafeprinter.PrettyPrint(&op)
 		_ = normalized
 
-		valid := astvalidation.DefaultOperationValidator()
+		valid := astvalidation.DefaultOperationValidator(opts.validationOptions...)
 		valid.Validate(&op, &def, &report)
 
 		p, err := plan.NewPlanner(config)
@@ -215,9 +220,9 @@ func RunTestWithVariables(definition, operation, operationName, variables string
 			t.Log("\n", actualPlan.(*plan.SynchronousResponsePlan).Response.Fetches.QueryPlan().PrettyPrint())
 		}
 
-		formatterConfig := map[reflect.Type]interface{}{
+		formatterConfig := map[reflect.Type]any{
 			// normalize byte slices to strings
-			reflect.TypeOf([]byte{}): func(b []byte) string { return fmt.Sprintf(`"%s"`, string(b)) },
+			reflect.TypeFor[[]byte](): func(b []byte) string { return fmt.Sprintf(`"%s"`, string(b)) },
 			// normalize map[string]struct{} to json array of keys
 			reflect.TypeOf(map[string]struct{}{}): func(m map[string]struct{}) string {
 				var keys []string
@@ -229,7 +234,7 @@ func RunTestWithVariables(definition, operation, operationName, variables string
 				keysPrinted, _ := json.Marshal(keys)
 				return string(keysPrinted)
 			},
-			reflect.TypeOf(resolve.SkipArrayItem(func(ctx *resolve.Context, arrayItem *astjson.Value) bool { return false })): func(resolve.SkipArrayItem) string { return "skip_function" },
+			reflect.TypeFor[resolve.SkipArrayItem](): func(resolve.SkipArrayItem) string { return "skip_function" },
 		}
 
 		prettyCfg := &pretty.Config{

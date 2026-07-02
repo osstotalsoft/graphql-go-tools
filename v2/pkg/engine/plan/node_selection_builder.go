@@ -88,6 +88,8 @@ func (p *NodeSelectionBuilder) ResetSkipFieldRefs() {
 	p.nodeSelectionsVisitor.newFieldRefs = make(map[int]struct{})
 }
 
+// SelectNodes implements Steps 1-2 of the planner pipeline.
+// It assigns all the fields and their requirements (via @key and @requires) to DataSources.
 func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, report *operationreport.Report) (out *NodeSelectionResult) {
 	dsFilter := NewDataSourceFilter(operation, definition, report, p.config.DataSources, p.nodeSelectionsVisitor.newFieldRefs)
 
@@ -96,23 +98,26 @@ func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, 
 	}
 
 	if p.config.Debug.PrintOperationTransformations {
-		debugMessage("Initial operation:")
+		debugMessage("SelectNodes. Initial operation:\n===========")
 		p.printOperation(operation)
 	}
 
 	p.nodeSelectionsVisitor.debug = p.config.Debug
 
-	// set initial suggestions and used data sources
-	p.nodeSelectionsVisitor.dataSources, p.nodeSelectionsVisitor.nodeSuggestions =
-		dsFilter.FilterDataSources(nil, nil)
+	// Step 1. Produce initial suggestions of which datasource owns which fields.
+	// We collect info from all subgraphs with the field, plus available keys per path.
+	p.nodeSelectionsVisitor.dataSources, p.nodeSelectionsVisitor.nodeSuggestions = dsFilter.FilterDataSources(nil, nil)
 	if report.HasErrors() {
 		return
 	}
 
 	if p.config.Debug.PrintNodeSuggestions {
-		p.nodeSelectionsVisitor.nodeSuggestions.printNodesWithFilter("\nInitial node suggestions:\n", p.config.Debug.PrintNodeSuggestionsFilterNotSelected)
+		p.nodeSelectionsVisitor.nodeSuggestions.printNodesWithFilter("\nInitial node suggestions:\n",
+			p.config.Debug.PrintNodeSuggestionsFilterNotSelected)
 	}
 
+	// Step 2. For every DataSource-assigned field, check if it has @key or @requires dependencies.
+	// Add newly found dependency/required fields into the GraphQL operation.
 	p.nodeSelectionsVisitor.secondaryRun = false
 	p.nodeSelectionsWalker.Walk(operation, definition, report)
 	if report.HasErrors() {
@@ -120,16 +125,16 @@ func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, 
 	}
 
 	if p.config.Debug.PrintOperationTransformations {
-		debugMessage("Select nodes initial run - operation:")
+		debugMessage("Selected nodes on run #1 for operation:")
 		p.printOperation(operation)
 	}
 
 	i := 1
 	hasUnresolvedFields := false
-	// secondary runs to add path for the new required fields
+	// Additional runs to add paths for the new required fields
 	for p.nodeSelectionsVisitor.hasNewFields || hasUnresolvedFields {
-		// when we have rewritten a field old node suggestion are not make sense anymore
-		// so we are removing child nodes of the rewritten fields
+		// When we have rewritten a field, the old node suggestion does not make sense anymore:
+		// we have to remove child nodes of the rewritten fields.
 		for _, fieldRef := range p.nodeSelectionsVisitor.rewrittenFieldRefs {
 			p.nodeSelectionsVisitor.nodeSuggestions.RemoveTreeNodeChilds(fieldRef)
 		}
@@ -137,46 +142,42 @@ func (p *NodeSelectionBuilder) SelectNodes(operation, definition *ast.Document, 
 		p.nodeSelectionsVisitor.secondaryRun = true
 
 		if p.nodeSelectionsVisitor.hasNewFields {
-			// update suggestions for the new required fields
-			p.nodeSelectionsVisitor.dataSources, p.nodeSelectionsVisitor.nodeSuggestions =
-				dsFilter.FilterDataSources(p.nodeSelectionsVisitor.fieldLandedTo, p.nodeSelectionsVisitor.fieldRefDependsOn)
+			// Repeat Step 1. Update suggestions for the new required fields.
+			p.nodeSelectionsVisitor.dataSources, p.nodeSelectionsVisitor.nodeSuggestions = dsFilter.FilterDataSources(p.nodeSelectionsVisitor.fieldLandedTo, p.nodeSelectionsVisitor.fieldRefDependsOn)
 			if report.HasErrors() {
 				return
 			}
 		}
 
 		if p.config.Debug.PrintOperationTransformations || p.config.Debug.PrintNodeSuggestions {
-			debugMessage(fmt.Sprintf("Select nodes run #%d", i))
+			debugMessage(fmt.Sprintf("Selected nodes on additional run #%d.", i+1))
 		}
 
 		if p.config.Debug.PrintNodeSuggestions {
-			p.nodeSelectionsVisitor.nodeSuggestions.printNodesWithFilter("\nRecalculated node suggestions:\n", p.config.Debug.PrintNodeSuggestionsFilterNotSelected)
+			p.nodeSelectionsVisitor.nodeSuggestions.printNodesWithFilter("\nUpdated node suggestions:\n", p.config.Debug.PrintNodeSuggestionsFilterNotSelected)
 		}
 
+		// Repeat Step 2.
 		p.nodeSelectionsWalker.Walk(operation, definition, report)
 		if report.HasErrors() {
 			return
 		}
 
 		if p.config.Debug.PrintOperationTransformations {
-			debugMessage("Operation with new required fields:")
-			debugMessage(fmt.Sprintf("Has new fields: %v", p.nodeSelectionsVisitor.hasNewFields))
+			debugMessage(fmt.Sprintf("Operation with new required fields (has new fields: %v):", p.nodeSelectionsVisitor.hasNewFields))
 			p.printOperation(operation)
 		}
 
 		i++
 
-		if resolvableReport := p.isResolvable(operation, definition, p.nodeSelectionsVisitor.nodeSuggestions); resolvableReport.HasErrors() {
-			hasUnresolvedFields = true
-
+		resolvableReport := p.isResolvable(operation, definition, p.nodeSelectionsVisitor.nodeSuggestions)
+		hasUnresolvedFields = resolvableReport.HasErrors()
+		if hasUnresolvedFields {
 			if i > 100 {
 				report.AddInternalError(fmt.Errorf("could not resolve a field: %v", resolvableReport))
 				return
 			}
-
 			continue
-		} else {
-			hasUnresolvedFields = false
 		}
 
 		// if we have revisited operation more than 100 times, we have a bug

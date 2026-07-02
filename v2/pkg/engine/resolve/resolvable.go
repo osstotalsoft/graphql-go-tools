@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/pkg/errors"
 	"github.com/tidwall/gjson"
 
 	"github.com/wundergraph/astjson"
+	"github.com/wundergraph/go-arena"
 
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/errorcodes"
@@ -30,8 +32,9 @@ type Resolvable struct {
 	errors               *astjson.Value
 	valueCompletion      *astjson.Value
 	skipAddingNullErrors bool
-
-	astjsonArena *astjson.Arena
+	// astjsonArena is the arena to handle json, supplied by Resolver
+	// not thread safe, but Resolvable is single threaded anyways
+	astjsonArena arena.Arena
 	parsers      []*astjson.Parser
 
 	print              bool
@@ -58,6 +61,18 @@ type Resolvable struct {
 	enclosingTypeNames []string
 
 	currentFieldInfo *FieldInfo
+
+	// typeNameStats maps the JSON path to its accumulated array/object stats in the final response.
+	// Used to compute the actual cost of the operation.
+	typeNameStats map[string]TypeNameStats
+
+	subgraphExtensions []*astjson.Object
+	allowedExtensions  map[string]*astjson.Value
+}
+
+type TypeNameStats struct {
+	Size      int            // the Size of the resolved array/list. It is 1 for non-list objects.
+	TypeNames map[string]int // distribution of TypeNames in the array
 }
 
 type ResolvableOptions struct {
@@ -65,15 +80,43 @@ type ResolvableOptions struct {
 	ApolloCompatibilityTruncateFloatValues         bool
 	ApolloCompatibilitySuppressFetchErrors         bool
 	ApolloCompatibilityReplaceInvalidVarError      bool
+	AllowedSubgraphExtensions                      map[string]struct{}
+	ExtensionForwardingAlgorithm                   ExtensionForwardingAlgorithm
 }
 
-func NewResolvable(options ResolvableOptions) *Resolvable {
+type ExtensionForwardingAlgorithm string
+
+const (
+	ExtensionForwardingAlgorithmFirstWrite ExtensionForwardingAlgorithm = "first_write"
+	ExtensionForwardingAlgorithmLastWrite  ExtensionForwardingAlgorithm = "last_write"
+)
+
+func (a ExtensionForwardingAlgorithm) isValid() bool {
+	switch a {
+	case ExtensionForwardingAlgorithmFirstWrite, ExtensionForwardingAlgorithmLastWrite:
+		return true
+	default:
+		return false
+	}
+}
+
+func MapExtensionForwardingAlgorithm(algorithm string) ExtensionForwardingAlgorithm {
+	switch ExtensionForwardingAlgorithm(algorithm) {
+	case ExtensionForwardingAlgorithmFirstWrite, ExtensionForwardingAlgorithmLastWrite:
+		return ExtensionForwardingAlgorithm(algorithm)
+	default:
+		return ExtensionForwardingAlgorithmFirstWrite
+	}
+}
+
+func NewResolvable(a arena.Arena, options ResolvableOptions) *Resolvable {
 	return &Resolvable{
 		options:            options,
 		xxh:                xxhash.New(),
 		authorizationAllow: make(map[uint64]struct{}),
 		authorizationDeny:  make(map[uint64]string),
-		astjsonArena:       &astjson.Arena{},
+		astjsonArena:       a,
+		typeNameStats:      make(map[string]TypeNameStats),
 	}
 }
 
@@ -95,28 +138,28 @@ func (r *Resolvable) Reset() {
 	r.operationType = ast.OperationTypeUnknown
 	r.renameTypeNames = r.renameTypeNames[:0]
 	r.authorizationError = nil
-	r.astjsonArena.Reset()
+	r.astjsonArena = nil
 	r.xxh.Reset()
-	for k := range r.authorizationAllow {
-		delete(r.authorizationAllow, k)
-	}
-	for k := range r.authorizationDeny {
-		delete(r.authorizationDeny, k)
-	}
+	r.allowedExtensions = nil
+	clear(r.subgraphExtensions)
+	clear(r.authorizationAllow)
+	clear(r.authorizationDeny)
+	clear(r.typeNameStats)
 }
 
 func (r *Resolvable) Init(ctx *Context, initialData []byte, operationType ast.OperationType) (err error) {
 	r.ctx = ctx
 	r.operationType = operationType
 	r.renameTypeNames = ctx.RenameTypeNames
-	r.data = r.astjsonArena.NewObject()
-	r.errors = r.astjsonArena.NewArray()
+	r.data = astjson.ObjectValue(r.astjsonArena)
+	// don't init errors! It will heavily increase memory usage
+	r.errors = nil
 	if initialData != nil {
-		initialValue, err := astjson.ParseBytesWithoutCache(initialData)
+		initialValue, err := astjson.ParseBytesWithArena(r.astjsonArena, initialData)
 		if err != nil {
 			return err
 		}
-		r.data, _, err = astjson.MergeValues(r.data, initialValue)
+		r.data, _, err = astjson.MergeValues(r.astjsonArena, r.data, initialValue)
 		if err != nil {
 			return err
 		}
@@ -128,20 +171,22 @@ func (r *Resolvable) InitSubscription(ctx *Context, initialData []byte, postProc
 	r.ctx = ctx
 	r.operationType = ast.OperationTypeSubscription
 	r.renameTypeNames = ctx.RenameTypeNames
+	// don't init errors! It will heavily increase memory usage
+	r.errors = nil
 	if initialData != nil {
-		initialValue, err := astjson.ParseBytesWithoutCache(initialData)
+		initialValue, err := astjson.ParseBytesWithArena(r.astjsonArena, initialData)
 		if err != nil {
 			return err
 		}
 		if postProcessing.SelectResponseDataPath == nil {
-			r.data, _, err = astjson.MergeValuesWithPath(r.data, initialValue, postProcessing.MergePath...)
+			r.data, _, err = astjson.MergeValuesWithPath(r.astjsonArena, r.data, initialValue, postProcessing.MergePath...)
 			if err != nil {
 				return err
 			}
 		} else {
 			selectedInitialValue := initialValue.Get(postProcessing.SelectResponseDataPath...)
 			if selectedInitialValue != nil {
-				r.data, _, err = astjson.MergeValuesWithPath(r.data, selectedInitialValue, postProcessing.MergePath...)
+				r.data, _, err = astjson.MergeValuesWithPath(r.astjsonArena, r.data, selectedInitialValue, postProcessing.MergePath...)
 				if err != nil {
 					return err
 				}
@@ -155,10 +200,7 @@ func (r *Resolvable) InitSubscription(ctx *Context, initialData []byte, postProc
 		}
 	}
 	if r.data == nil {
-		r.data = r.astjsonArena.NewObject()
-	}
-	if r.errors == nil {
-		r.errors = r.astjsonArena.NewArray()
+		r.data = astjson.ObjectValue(r.astjsonArena)
 	}
 	return
 }
@@ -168,7 +210,8 @@ func (r *Resolvable) ResolveNode(node Node, data *astjson.Value, out io.Writer) 
 	r.print = false
 	r.printErr = nil
 	r.authorizationError = nil
-	r.errors = r.astjsonArena.NewArray()
+	// don't init errors! It will heavily increase memory usage
+	r.errors = nil
 
 	hasErrors := r.walkNode(node, data)
 	if hasErrors {
@@ -232,6 +275,13 @@ func (r *Resolvable) Resolve(ctx context.Context, rootData *Object, fetchTree *F
 	}
 	r.printBytes(rBrace)
 	return r.printErr
+}
+
+// ensureErrorsInitialized is used to lazily init r.errors if needed
+func (r *Resolvable) ensureErrorsInitialized() {
+	if r.errors == nil {
+		r.errors = astjson.ArrayValue(r.astjsonArena)
+	}
 }
 
 func (r *Resolvable) enclosingTypeName() string {
@@ -322,10 +372,31 @@ func (r *Resolvable) printExtensions(ctx context.Context, fetchTree *FetchTreeNo
 		if writeComma {
 			r.printBytes(comma)
 		}
-		writeComma = true //nolint:all // should we add another print func, we should not forget to write a comma
+		writeComma = true
 		err := r.printValueCompletionExtension()
 		if err != nil {
 			return err
+		}
+	}
+
+	if len(r.allowedExtensions) > 0 {
+		if writeComma {
+			r.printBytes(comma)
+		}
+		writeComma = true //nolint:all // should we add another print func, we should not forget to write a comma
+
+		counter := 0
+		for key, value := range r.allowedExtensions {
+			if counter > 0 {
+				r.printBytes(comma)
+			}
+			counter++
+			r.printBytes(quote)
+			r.printBytes([]byte(key))
+			r.printBytes(quote)
+			r.printBytes(colon)
+			r.printNode(value)
+
 		}
 	}
 
@@ -386,7 +457,21 @@ func (r *Resolvable) printValueCompletionExtension() error {
 	return nil
 }
 
+func getDefaultReservedExtensions() map[string]struct{} {
+	return map[string]struct{}{
+		string(literalAuthorization):   {},
+		string(literalRateLimit):       {},
+		string(literalQueryPlan):       {},
+		string(literalTrace):           {},
+		string(literalValueCompletion): {},
+	}
+}
+
 func (r *Resolvable) hasExtensions() bool {
+	// Apply the filter first to avoid missing extensions or applying empty extensions.
+	if r.filterAllowedSubgraphExtensions(getDefaultReservedExtensions()) {
+		return true
+	}
 	if r.ctx.authorizer != nil && r.ctx.authorizer.HasResponseExtensionData(r.ctx) {
 		return true
 	}
@@ -403,6 +488,45 @@ func (r *Resolvable) hasExtensions() bool {
 		return true
 	}
 	return false
+}
+
+func (r *Resolvable) filterAllowedSubgraphExtensions(writtenExtensions map[string]struct{}) bool {
+	if len(r.subgraphExtensions) == 0 {
+		return false
+	}
+
+	r.allowedExtensions = make(map[string]*astjson.Value)
+	algorithm := r.options.ExtensionForwardingAlgorithm
+
+	if !algorithm.isValid() {
+		algorithm = ExtensionForwardingAlgorithmFirstWrite
+	}
+
+	override := algorithm == ExtensionForwardingAlgorithmLastWrite
+
+	// filter only allowed extensions. If the allowed extensions are empty, all extensions are allowed
+	for _, extension := range r.subgraphExtensions {
+		extension.Visit(func(key []byte, v *astjson.Value) {
+			keyString := string(key)
+			if len(r.options.AllowedSubgraphExtensions) > 0 {
+				if _, ok := r.options.AllowedSubgraphExtensions[keyString]; !ok {
+					return
+				}
+			}
+
+			// don't print the same extension twice
+			if _, exists := writtenExtensions[keyString]; exists {
+				return
+			}
+
+			// We either add the extension to the valid extension map or we override it when we're in last write mode
+			if _, exists := r.allowedExtensions[keyString]; !exists || (exists && override) {
+				r.allowedExtensions[string(key)] = v
+			}
+		})
+	}
+
+	return len(r.allowedExtensions) > 0
 }
 
 func (r *Resolvable) WroteErrorsWithoutData() bool {
@@ -464,7 +588,7 @@ func (r *Resolvable) renderScalarFieldValue(value *astjson.Value, nullable bool)
 
 // renderScalarFieldString - is used when value require some pre-processing, e.g. unescaping or custom rendering
 func (r *Resolvable) renderScalarFieldBytes(data []byte, nullable bool) {
-	value, err := astjson.ParseBytesWithoutCache(data)
+	value, err := astjson.ParseBytesWithArena(r.astjsonArena, data)
 	if err != nil {
 		r.printErr = err
 		return
@@ -615,6 +739,10 @@ func (r *Resolvable) walkObject(obj *Object, parent *astjson.Value) bool {
 		}
 	}
 
+	if !r.print {
+		r.recordObjectTypeStats(obj, typeName) // For Cost Control
+	}
+
 	if r.print && !isRoot {
 		r.printBytes(lBrace)
 	}
@@ -644,12 +772,12 @@ func (r *Resolvable) walkObject(obj *Object, parent *astjson.Value) bool {
 					path := obj.Fields[i].Value.NodePath()
 					field := value.Get(path...)
 					if field != nil {
-						astjson.SetNull(value, path...)
+						astjson.SetNull(r.astjsonArena, value, path...)
 					}
 				} else if obj.Nullable && len(obj.Path) > 0 {
 					// if the field value is not nullable, but the object is nullable
 					// we can just set the whole object to null
-					astjson.SetNull(parent, obj.Path...)
+					astjson.SetNull(r.astjsonArena, parent, obj.Path...)
 					return false
 				} else {
 					// if the field value is not nullable and the object is not nullable
@@ -673,7 +801,7 @@ func (r *Resolvable) walkObject(obj *Object, parent *astjson.Value) bool {
 		if err {
 			if obj.Nullable {
 				if len(obj.Path) > 0 {
-					astjson.SetNull(parent, obj.Path...)
+					astjson.SetNull(r.astjsonArena, parent, obj.Path...)
 					return false
 				}
 			}
@@ -760,6 +888,7 @@ func (r *Resolvable) addRejectFieldError(reason string, ds DataSourceInfo, field
 	}
 	r.ctx.appendSubgraphErrors(ds, errors.New(errorMessage),
 		NewSubgraphError(ds, fieldPath, reason, 0))
+	r.ensureErrorsInitialized()
 	fastjsonext.AppendErrorWithExtensionsCodeToArray(r.astjsonArena, r.errors, errorMessage, errorcodes.UnauthorizedFieldOrType, r.path)
 	r.popNodePathElement(nodePath)
 }
@@ -831,6 +960,28 @@ func (r *Resolvable) walkArray(arr *Array, value *astjson.Value) bool {
 	}
 	values := value.GetArray()
 
+	if !r.print {
+		// Record arrays stats for Cost Control.
+		pathKey := r.currentFieldPath()
+		stats := r.typeNameStats[pathKey]
+		stats.Size += len(values)
+		if stats.TypeNames == nil && len(values) > 0 {
+			stats.TypeNames = make(map[string]int)
+		}
+		for _, arrayValue := range values {
+			var typeName string
+			if b := arrayValue.GetStringBytes("__typename"); b != nil {
+				typeName = string(b)
+			} else if obj, ok := arr.Item.(*Object); ok {
+				typeName = obj.TypeName
+			}
+			if typeName != "" {
+				stats.TypeNames[typeName]++
+			}
+		}
+		r.typeNameStats[pathKey] = stats
+	}
+
 	hasPrintedValue := false
 	for i, arrayValue := range values {
 		skip := false
@@ -853,11 +1004,11 @@ func (r *Resolvable) walkArray(arr *Array, value *astjson.Value) bool {
 		r.popArrayPathElement()
 		if err {
 			if arr.Item.NodeKind() == NodeKindObject && arr.Item.NodeNullable() {
-				value.SetArrayItem(i, astjson.NullValue)
+				value.SetArrayItem(r.astjsonArena, i, astjson.NullValue)
 				continue
 			}
 			if arr.Nullable {
-				astjson.SetNull(parent, arr.Path...)
+				astjson.SetNull(r.astjsonArena, parent, arr.Path...)
 				return false
 			}
 			return err
@@ -867,6 +1018,39 @@ func (r *Resolvable) walkArray(arr *Array, value *astjson.Value) bool {
 		r.printBytes(rBrack)
 	}
 	return false
+}
+
+// recordObjectTypeStats records the runtime __typename of a single (non-array) object
+// that resolves an abstract (interface/union) field.
+func (r *Resolvable) recordObjectTypeStats(obj *Object, typeName []byte) {
+	// An array item Object has an empty Path
+	if len(obj.Path) == 0 || !obj.isAbstract() {
+		return
+	}
+	pathKey := r.currentFieldPath()
+	stats := r.typeNameStats[pathKey]
+	stats.Size++
+	if stats.TypeNames == nil {
+		stats.TypeNames = make(map[string]int, 1)
+	}
+	// Fall back to the declared abstract type name when the subgraph did not return __typename.
+	name := obj.TypeName
+	if typeName != nil {
+		name = string(typeName)
+	}
+	stats.TypeNames[name]++
+	r.typeNameStats[pathKey] = stats
+}
+
+// Helper to build JSON path (field names only, no array indices)
+func (r *Resolvable) currentFieldPath() string {
+	var parts []string
+	for _, elem := range r.path {
+		if elem.Name != "" {
+			parts = append(parts, elem.Name)
+		}
+	}
+	return strings.Join(parts, ".")
 }
 
 func (r *Resolvable) walkNull() bool {
@@ -1201,6 +1385,7 @@ func (r *Resolvable) addNonNullableFieldError(fieldPath []string, parent *astjso
 		r.addValueCompletion(r.renderApolloCompatibleNonNullableErrorMessage(), errorcodes.InvalidGraphql)
 	} else {
 		errorMessage := fmt.Sprintf("Cannot return null for non-nullable field '%s'.", r.renderFieldPath())
+		r.ensureErrorsInitialized()
 		fastjsonext.AppendErrorToArray(r.astjsonArena, r.errors, errorMessage, r.path)
 	}
 	r.popNodePathElement(fieldPath)
@@ -1271,30 +1456,33 @@ func (r *Resolvable) renderFieldCoordinates() string {
 
 func (r *Resolvable) addError(message string, fieldPath []string) {
 	r.pushNodePathElement(fieldPath)
+	r.ensureErrorsInitialized()
 	fastjsonext.AppendErrorToArray(r.astjsonArena, r.errors, message, r.path)
 	r.popNodePathElement(fieldPath)
 }
 
 func (r *Resolvable) addErrorWithCode(message, code string) {
+	r.ensureErrorsInitialized()
 	fastjsonext.AppendErrorWithExtensionsCodeToArray(r.astjsonArena, r.errors, message, code, r.path)
 }
 
 func (r *Resolvable) addErrorWithCodeAndPath(message, code string, fieldPath []string) {
 	r.pushNodePathElement(fieldPath)
+	r.ensureErrorsInitialized()
 	fastjsonext.AppendErrorWithExtensionsCodeToArray(r.astjsonArena, r.errors, message, code, r.path)
 	r.popNodePathElement(fieldPath)
 }
 
 func (r *Resolvable) addValueCompletion(message, code string) {
 	if r.valueCompletion == nil {
-		r.valueCompletion = r.astjsonArena.NewArray()
+		r.valueCompletion = astjson.ArrayValue(r.astjsonArena)
 	}
 	fastjsonext.AppendErrorWithExtensionsCodeToArray(r.astjsonArena, r.valueCompletion, message, code, r.path)
 }
 
 func (r *Resolvable) addValueCompletionWithPath(message, code string, fieldPath []string) {
 	if r.valueCompletion == nil {
-		r.valueCompletion = r.astjsonArena.NewArray()
+		r.valueCompletion = astjson.ArrayValue(r.astjsonArena)
 	}
 	r.pushNodePathElement(fieldPath)
 	fastjsonext.AppendErrorWithExtensionsCodeToArray(r.astjsonArena, r.valueCompletion, message, code, r.path)

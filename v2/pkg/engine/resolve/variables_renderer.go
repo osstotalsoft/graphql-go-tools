@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"io"
+	"slices"
 	"sync"
 
 	"github.com/buger/jsonparser"
@@ -109,10 +110,8 @@ func (t JsonRootType) Satisfies(dataType jsonparser.ValueType) bool {
 	case JsonRootTypeKindSingle:
 		return dataType == t.Value
 	case JsonRootTypeKindMultiple:
-		for _, valueType := range t.Values {
-			if dataType == valueType {
-				return true
-			}
+		if slices.Contains(t.Values, dataType) {
+			return true
 		}
 	}
 
@@ -350,7 +349,7 @@ var (
 func (g *GraphQLVariableResolveRenderer) getResolvable() *Resolvable {
 	v := _graphQLVariableResolveRendererPool.Get()
 	if v == nil {
-		return NewResolvable(ResolvableOptions{})
+		return NewResolvable(nil, ResolvableOptions{})
 	}
 	return v.(*Resolvable)
 }

@@ -1,10 +1,10 @@
 package plan
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"reflect"
 	"slices"
 	"testing"
@@ -58,9 +58,9 @@ func TestPlanner_Plan(t *testing.T) {
 				t.Fatal(report.Error())
 			}
 
-			formatterConfig := map[reflect.Type]interface{}{
+			formatterConfig := map[reflect.Type]any{
 				// normalize byte slices to strings
-				reflect.TypeOf([]byte{}): func(b []byte) string { return fmt.Sprintf(`"%s"`, string(b)) },
+				reflect.TypeFor[[]byte](): func(b []byte) string { return fmt.Sprintf(`"%s"`, string(b)) },
 				// normalize map[string]struct{} to json array of keys
 				reflect.TypeOf(map[string]struct{}{}): func(m map[string]struct{}) string {
 					var keys []string
@@ -1075,10 +1075,10 @@ type FakeDataSource struct {
 	source *StatefulSource
 }
 
-func (f *FakeDataSource) Load(ctx context.Context, input []byte, out *bytes.Buffer) (err error) {
-	return
+func (f *FakeDataSource) Load(ctx context.Context, headers http.Header, input []byte) (data []byte, err error) {
+	return nil, nil
 }
 
-func (f *FakeDataSource) LoadWithFiles(ctx context.Context, input []byte, files []*httpclient.FileUpload, out *bytes.Buffer) (err error) {
-	return
+func (f *FakeDataSource) LoadWithFiles(ctx context.Context, headers http.Header, input []byte, files []*httpclient.FileUpload) (data []byte, err error) {
+	return nil, nil
 }

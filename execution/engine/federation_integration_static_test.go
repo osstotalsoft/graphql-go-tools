@@ -1,5 +1,3 @@
-//go:build !race
-
 package engine
 
 import (
@@ -16,16 +14,18 @@ import (
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/testing/flags"
 )
 
-// This tests produces data races in the generated gql code. Disable it when the race
-// detector is enabled.
 func TestExecutionEngine_FederationAndSubscription_IntegrationTest(t *testing.T) {
+	t.Parallel()
+
 	if flags.IsWindows {
 		t.Skip("skip on windows - test is timing dependent")
 	}
 
 	t.Run("operation", func(t *testing.T) {
+		t.Parallel()
 		ctx, cancelFn := context.WithCancel(context.Background())
-		setup := federationtesting.NewFederationSetup()
+		setup, err := federationtesting.NewFederationSetup()
+		require.NoError(t, err)
 		t.Cleanup(func() {
 			cancelFn()
 			setup.Close()
@@ -45,8 +45,7 @@ func TestExecutionEngine_FederationAndSubscription_IntegrationTest(t *testing.T)
 			require.NoError(t, err)
 			require.True(t, validationResult.Valid)
 
-			execCtx, execCtxCancelFn := context.WithCancel(context.Background())
-			defer execCtxCancelFn()
+			execCtx := t.Context()
 
 			resultWriter := graphql.NewEngineResultWriter()
 			err = engine.Execute(execCtx, gqlRequest, &resultWriter)
@@ -60,8 +59,10 @@ func TestExecutionEngine_FederationAndSubscription_IntegrationTest(t *testing.T)
 	})
 
 	t.Run("subscription", func(t *testing.T) {
+		t.Parallel()
 		ctx, cancelFn := context.WithCancel(context.Background())
-		setup := federationtesting.NewFederationSetup()
+		setup, err := federationtesting.NewFederationSetup()
+		require.NoError(t, err)
 		t.Cleanup(func() {
 			cancelFn()
 			setup.Close()
@@ -97,8 +98,7 @@ subscription UpdatedPrice {
 			require.NoError(t, err)
 			require.True(t, validationResult.Valid)
 
-			execCtx, execCtxCancelFn := context.WithCancel(context.Background())
-			defer execCtxCancelFn()
+			execCtx := t.Context()
 
 			message := make(chan string)
 			resultWriter := graphql.NewEngineResultWriter()

@@ -18,6 +18,7 @@ type Planner struct {
 
 	planningWalker  *astvisitor.Walker
 	planningVisitor *Visitor
+	costVisitor     *CostVisitor
 
 	nodeSelectionBuilder *NodeSelectionBuilder
 	planningPathBuilder  *PathBuilder
@@ -59,11 +60,9 @@ func NewPlanner(config Configuration) (*Planner, error) {
 	// planning
 
 	planningWalker := astvisitor.NewWalkerWithID(48, "PlanningWalker")
-	planningVisitor := &Visitor{
-		Walker:                       &planningWalker,
-		fieldConfigs:                 map[int]*FieldConfiguration{},
-		disableResolveFieldPositions: config.DisableResolveFieldPositions,
-	}
+
+	planningVisitor := NewVisitor(&planningWalker)
+	planningVisitor.disableResolveFieldPositions = config.DisableResolveFieldPositions
 
 	p := &Planner{
 		config:                 config,
@@ -73,14 +72,6 @@ func NewPlanner(config Configuration) (*Planner, error) {
 	}
 
 	return p, nil
-}
-
-func (p *Planner) SetConfig(config Configuration) {
-	p.config = config
-}
-
-func (p *Planner) SetDebugConfig(config DebugConfiguration) {
-	p.config.Debug = config
 }
 
 type _opts struct {
@@ -96,7 +87,6 @@ func IncludeQueryPlanInResponse() Opts {
 }
 
 func (p *Planner) Plan(operation, definition *ast.Document, operationName string, report *operationreport.Report, options ...Opts) (plan Plan) {
-
 	var opts _opts
 	for _, opt := range options {
 		opt(&opts)
@@ -126,12 +116,15 @@ func (p *Planner) Plan(operation, definition *ast.Document, operationName string
 	p.nodeSelectionBuilder.SetOperationName(p.planningVisitor.OperationName)
 	p.nodeSelectionBuilder.ResetSkipFieldRefs()
 
+	// Steps 1-2. Assigns all the fields to DataSources.
 	selectionsConfig := p.nodeSelectionBuilder.SelectNodes(operation, definition, report)
 	if report.HasErrors() {
 		return nil
 	}
 
-	// create planning paths
+	// Step 3. Create planning paths. We create actual raw plans where all fields are assigned to
+	// fetches with infos about dependencies. A fetch could depend on other fetches and contain
+	// required fields configurations.
 	if p.planningPathBuilder == nil {
 		p.planningPathBuilder = NewPathBuilder(&p.config)
 	}
@@ -143,11 +136,15 @@ func (p *Planner) Plan(operation, definition *ast.Document, operationName string
 		return nil
 	}
 
+	// Step 4. Create the response shape and skip fields added by the planner.
+	// Each subgraph DS planner writes its own GraphQL operation document using
+	// only the paths/fields it owns from its PlannerConfiguration.
+	// Each planner creates representation objects (_entities input templates) from field configs
+	// to be used as entity fetches.
+	// Output is tree: response-shape root with embedded fetch-configurations. Yet it is a raw plan.
 	if p.config.Debug.PlanningVisitor {
-		debugMessage("Planning visitor:")
+		debugMessage("Planning Visitor\n================")
 	}
-
-	// configure planning visitor
 
 	p.planningVisitor.planners = plannersConfigurations
 	p.planningVisitor.Config = p.config
@@ -165,6 +162,21 @@ func (p *Planner) Plan(operation, definition *ast.Document, operationName string
 	p.planningWalker.RegisterEnterDirectiveVisitor(p.planningVisitor)
 	p.planningWalker.RegisterInlineFragmentVisitor(p.planningVisitor)
 
+	// Register cost visitor on the same walker (will be invoked after planningVisitor hooks).
+	// We have to register it last in the walker, as it depends on the fieldPlanners field of the
+	// visitor. That field is populated in the AllowVisitor callback. Walker calls Enter* callbacks
+	// in the order they were registered, and Leave* callbacks in the reverse order.
+	if p.config.ComputeCosts {
+		p.costVisitor = NewCostVisitor(p.planningWalker, operation, definition)
+		p.costVisitor.planners = plannersConfigurations
+		p.costVisitor.fieldPlanners = p.planningVisitor.fieldPlanners
+		p.costVisitor.operationDefinition = &p.planningVisitor.operationDefinitionRef
+
+		p.planningWalker.RegisterEnterFieldVisitor(p.costVisitor)
+		p.planningWalker.RegisterLeaveFieldVisitor(p.costVisitor)
+	}
+
+	// Per-DS planners:
 	for key := range p.planningVisitor.planners {
 		if p.config.MinifySubgraphOperations {
 			if dataSourceWithMinify, ok := p.planningVisitor.planners[key].Planner().(SubgraphRequestMinifier); ok {
@@ -195,12 +207,20 @@ func (p *Planner) Plan(operation, definition *ast.Document, operationName string
 		}
 	}
 
-	// create raw execution plan
+	// create a raw execution plan
 	p.planningWalker.Walk(operation, definition, report)
 	if report.HasErrors() {
 		return
 	}
 
+	if p.config.ComputeCosts {
+		costCalc := NewCostCalculator(p.planningVisitor.Config)
+		costCalc.tree = p.costVisitor.finalCostTree()
+		p.planningVisitor.plan.SetCostCalculator(costCalc)
+	}
+
+	// Step 5. Plan is handed over to postprocess.Processor. It checks fetch dependencies and
+	// orders them into parallel or sequential groups and builds a fetch tree.
 	return p.planningVisitor.plan
 }
 

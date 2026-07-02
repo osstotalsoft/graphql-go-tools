@@ -1,5 +1,156 @@
 # Changelog
 
+## [1.16.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.15.6...execution/v1.16.0) (2026-06-18)
+
+
+### Features
+
+* enable to ignore cost weights on implementing types ([#1542](https://github.com/wundergraph/graphql-go-tools/issues/1542)) ([1ade300](https://github.com/wundergraph/graphql-go-tools/commit/1ade300421bcb1b68cefd63fc5268f19ee56336c))
+
+
+### Bug Fixes
+
+* **cost:** determine correctly the type of list-wrapped scalars and enums ([#1546](https://github.com/wundergraph/graphql-go-tools/issues/1546)) ([2575480](https://github.com/wundergraph/graphql-go-tools/commit/2575480b966074a887db1f96ee8a0ef2022effcd))
+
+## [1.15.6](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.15.5...execution/v1.15.6) (2026-06-11)
+
+
+### Bug Fixes
+
+* bump go-arena to v1.3.0 ([#1532](https://github.com/wundergraph/graphql-go-tools/issues/1532)) ([a4eb7d8](https://github.com/wundergraph/graphql-go-tools/commit/a4eb7d8a1fb34eb7e65ed351a973b7eeea08bc0c))
+
+## [1.15.5](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.15.4...execution/v1.15.5) (2026-06-08)
+
+
+### Bug Fixes
+
+* calculate costs for abstract fields without double counting ([#1521](https://github.com/wundergraph/graphql-go-tools/issues/1521)) ([4175a9e](https://github.com/wundergraph/graphql-go-tools/commit/4175a9e1168ca0ac4a3c98dba1184a23ad69d8cc))
+* fallback to abstract name if no __typename was sent ([#1527](https://github.com/wundergraph/graphql-go-tools/issues/1527)) ([2548d5a](https://github.com/wundergraph/graphql-go-tools/commit/2548d5ac8d4ba8d2869255e82eb2e8595032bba7))
+
+## [1.15.4](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.15.3...execution/v1.15.4) (2026-06-03)
+
+
+### Bug Fixes
+
+* bump grpc to v1.80.0 ([#1511](https://github.com/wundergraph/graphql-go-tools/issues/1511)) ([5c2debf](https://github.com/wundergraph/graphql-go-tools/commit/5c2debfdd83a02ccc08468fe508540100624c177))
+* use float64 for intermediate cost calculations ([#1514](https://github.com/wundergraph/graphql-go-tools/issues/1514)) ([d415ae5](https://github.com/wundergraph/graphql-go-tools/commit/d415ae5b6940b26386dd1d0047910b18528a8637))
+
+## [1.15.3](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.15.2...execution/v1.15.3) (2026-05-21)
+
+
+### Bug Fixes
+
+* use remapped variables in cost calculation ([#1505](https://github.com/wundergraph/graphql-go-tools/issues/1505)) ([972ad0f](https://github.com/wundergraph/graphql-go-tools/commit/972ad0f7e38c9201784293a09cdefd6c50d67fc9))
+
+## [1.15.2](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.15.1...execution/v1.15.2) (2026-05-21)
+
+
+### Bug Fixes
+
+* **websocket:** prevent SIGSEGV in heartbeat goroutine when InitFunc returns (nil, err) ([#1506](https://github.com/wundergraph/graphql-go-tools/issues/1506)) ([de4b69d](https://github.com/wundergraph/graphql-go-tools/commit/de4b69d91329358ed004d4619344930af8cdad1d))
+
+## [1.15.1](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.15.0...execution/v1.15.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* handle default values for slicingArguments ([#1499](https://github.com/wundergraph/graphql-go-tools/issues/1499)) ([f3afd10](https://github.com/wundergraph/graphql-go-tools/commit/f3afd102f5304f43efd146ec68679de1b967b680))
+* multiply with 0 for empty lists in actual costs ([#1502](https://github.com/wundergraph/graphql-go-tools/issues/1502)) ([1cb6bde](https://github.com/wundergraph/graphql-go-tools/commit/1cb6bde9f169efd5be4cad7f0be5535fd07493cc))
+
+## [1.15.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.14.0...execution/v1.15.0) (2026-05-15)
+
+
+### Features
+
+* support dot-path in slicingArguments ([#1485](https://github.com/wundergraph/graphql-go-tools/issues/1485)) ([2cb8d5e](https://github.com/wundergraph/graphql-go-tools/commit/2cb8d5eee1aa8ef697868cbe323ebd1160fc3319))
+
+
+### Bug Fixes
+
+* find proper parent when sizedFields parent is a non-list wrapper ([#1493](https://github.com/wundergraph/graphql-go-tools/issues/1493)) ([6b96976](https://github.com/wundergraph/graphql-go-tools/commit/6b96976de1f1e457ee1cd5ff14039776e12f2ad0)), closes [#1492](https://github.com/wundergraph/graphql-go-tools/issues/1492)
+
+## [1.14.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.13.0...execution/v1.14.0) (2026-05-13)
+
+
+### Features
+
+* switch from composition-go wrapper to cosmo wgc composition ([#1483](https://github.com/wundergraph/graphql-go-tools/issues/1483)) ([34d07fc](https://github.com/wundergraph/graphql-go-tools/commit/34d07fc6106dbedf6e95939595b2fb71430b47f1))
+
+## [1.13.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.12.0...execution/v1.13.0) (2026-04-30)
+
+
+### Features
+
+* subscriptions overhaul ([#1374](https://github.com/wundergraph/graphql-go-tools/issues/1374)) ([6c0ac71](https://github.com/wundergraph/graphql-go-tools/commit/6c0ac71e071abf06fdf618d45d100769f0017acd))
+
+## [1.12.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.11.0...execution/v1.12.0) (2026-04-28)
+
+
+### Features
+
+* support costs on arguments of directives ([#1465](https://github.com/wundergraph/graphql-go-tools/issues/1465)) ([2eca1ab](https://github.com/wundergraph/graphql-go-tools/commit/2eca1ab9932395d9b3181d28e8e6c2c03818f68b))
+
+## [1.11.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.10.0...execution/v1.11.0) (2026-04-08)
+
+
+### Features
+
+* check slicing Arguments passed when requireOneSlicingArgument ([#1456](https://github.com/wundergraph/graphql-go-tools/issues/1456)) ([72c181f](https://github.com/wundergraph/graphql-go-tools/commit/72c181f8a5316f974985bcd2c7f364bf3fdc997c))
+* handle recursion for arguments containing input objects ([#1461](https://github.com/wundergraph/graphql-go-tools/issues/1461)) ([ba21793](https://github.com/wundergraph/graphql-go-tools/commit/ba21793c75bdd68a1f6bf70583cc09cbd767139b))
+
+## [1.10.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.9.0...execution/v1.10.0) (2026-03-19)
+
+
+### Features
+
+* add initial support for [@requires](https://github.com/requires) in gRPC ([#1362](https://github.com/wundergraph/graphql-go-tools/issues/1362)) ([07ae75e](https://github.com/wundergraph/graphql-go-tools/commit/07ae75ea00583b6209f39d182d8287ad2eea7e98))
+* support sizedFields in cost computations ([#1410](https://github.com/wundergraph/graphql-go-tools/issues/1410)) ([48f7582](https://github.com/wundergraph/graphql-go-tools/commit/48f75821b0d7e0ffb5f7e66cffba3d1ad0cbf9dc))
+
+
+### Bug Fixes
+
+* propagate actualListSizes via resolver context ([#1404](https://github.com/wundergraph/graphql-go-tools/issues/1404)) ([5433fcb](https://github.com/wundergraph/graphql-go-tools/commit/5433fcb28732115e451c9dfeb70dc13de62cda33))
+
+## [1.9.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.8.1...execution/v1.9.0) (2026-02-20)
+
+
+### Features
+
+* compute dynamic (actual) cost ([#1376](https://github.com/wundergraph/graphql-go-tools/issues/1376)) ([d6dc786](https://github.com/wundergraph/graphql-go-tools/commit/d6dc786c0505e396b9fab3adbee0c11693b1a123))
+
+## [1.8.1](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.8.0...execution/v1.8.1) (2026-02-19)
+
+
+### Bug Fixes
+
+* **resolve:** fix flaky singleflight deduplication tests ([#1393](https://github.com/wundergraph/graphql-go-tools/issues/1393)) ([4105082](https://github.com/wundergraph/graphql-go-tools/commit/41050822e677ec4f1e04b4541f078a976ffbee15))
+* **resolve:** guard OnFinished against nil loaderHookContext on skipped fetches ([#1394](https://github.com/wundergraph/graphql-go-tools/issues/1394)) ([f79d071](https://github.com/wundergraph/graphql-go-tools/commit/f79d07105440ee2f59242dff7e81e909b550a9d6))
+
+## [1.8.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.7.0...execution/v1.8.0) (2026-02-16)
+
+
+### Features
+
+* add flag for relaxed nullability checks on same shape ([#1378](https://github.com/wundergraph/graphql-go-tools/issues/1378)) ([6be2e74](https://github.com/wundergraph/graphql-go-tools/commit/6be2e74036a027f44adaff7f6bfbdbce1d1fb03b))
+
+
+### Bug Fixes
+
+* enable parallel execution for federation integration tests ([#1385](https://github.com/wundergraph/graphql-go-tools/issues/1385)) ([09d9348](https://github.com/wundergraph/graphql-go-tools/commit/09d934802ed1549881123c2e805159ec81981c37))
+
+## [1.7.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.6.0...execution/v1.7.0) (2026-02-06)
+
+
+### Features
+
+* compute static costs ([#1359](https://github.com/wundergraph/graphql-go-tools/issues/1359)) ([004f68e](https://github.com/wundergraph/graphql-go-tools/commit/004f68e2253c9f2ae9d20aa4488041c7551c84d7))
+* improve memory management & request deduplication ([#1336](https://github.com/wundergraph/graphql-go-tools/issues/1336)) ([938d1a9](https://github.com/wundergraph/graphql-go-tools/commit/938d1a9e13ef066fb514eb149e9aa44b886030c5))
+
+
+### Bug Fixes
+
+* add ability to exclude introspection queries from complexity limits ([#1342](https://github.com/wundergraph/graphql-go-tools/issues/1342)) ([19c8693](https://github.com/wundergraph/graphql-go-tools/commit/19c86930482956b2d5f96f2feae6d015d1052ef4))
+
 ## [1.6.0](https://github.com/wundergraph/graphql-go-tools/compare/execution/v1.5.0...execution/v1.6.0) (2025-10-21)
 
 

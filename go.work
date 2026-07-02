@@ -1,8 +1,7 @@
-go 1.25
-
-toolchain go1.25.1
+go 1.25.0
 
 use (
+	examples/engine
 	examples/federation
 	execution
 	v2

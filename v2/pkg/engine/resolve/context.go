@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
 	"time"
@@ -16,12 +17,21 @@ import (
 
 // Context should not ever be initialized directly, and should be initialized via the NewContext function
 type Context struct {
-	ctx              context.Context
-	Variables        *astjson.Value
+	ctx context.Context
+
+	// Variables contains the variables to be used to render values of variables for the subgraph.
+	// Resolver takes into account RemapVariables for variable names.
+	// Recommented read-only use via variables.VariablesView returned by VariablesView().
+	Variables *astjson.Value
+
+	// RemapVariables contains a map from new names to old names. When variables are renamed,
+	// the resolver will use the new name to look up the old name to render the variable in the query.
+	RemapVariables map[string]string
+
+	VariablesHash    uint64
 	Files            []*httpclient.FileUpload
 	Request          Request
 	RenameTypeNames  []RenameTypeName
-	RemapVariables   map[string]string
 	TracingOptions   TraceOptions
 	RateLimitOptions RateLimitOptions
 	ExecutionOptions ExecutionOptions
@@ -34,12 +44,90 @@ type Context struct {
 	fieldRenderer FieldValueRenderer
 
 	subgraphErrors map[string]error
+
+	SubgraphHeadersBuilder SubgraphHeadersBuilder
+
+	// TypeNameStats is populated by the resolver after resolution completes,
+	// before the response body is written. Maps JSON path to array stats.
+	// Used to compute the actual cost.
+	TypeNameStats map[string]TypeNameStats
+
+	// GetDeduplicationData is called after the leader of an inbound singleflight request
+	// finishes resolving. It extracts data from the leader's context (e.g. accumulated
+	// response headers) that should be shared with all follower requests.
+	// The returned value is stored on the InflightRequest and passed to each follower's
+	// SetDeduplicationData callback before the follower writes its response.
+	// Use SetDeduplicationCallbacks to set both callbacks with type safety.
+	GetDeduplicationData func(ctx context.Context) any
+	// SetDeduplicationData is called for each follower of an inbound singleflight request,
+	// before the response body is written to the client. The data argument is the value
+	// returned by the leader's GetDeduplicationData call.
+	// Typical use: copy response header propagation state from the leader into the
+	// follower's context so that the response writer can set the correct HTTP headers.
+	// Use SetDeduplicationCallbacks to set both callbacks with type safety.
+	SetDeduplicationData func(ctx context.Context, data any)
+}
+
+// SetDeduplicationCallbacks is a generic helper that configures both GetDeduplicationData
+// and SetDeduplicationData on a Context with compile-time type safety.
+// The resolve package stores the data as "any" internally, but callers get typed callbacks:
+//
+//	resolve.SetDeduplicationCallbacks(ctx,
+//	    func(ctx context.Context) *MyHeaders { return extractHeaders(ctx) },
+//	    func(ctx context.Context, h *MyHeaders) { applyHeaders(ctx, h) },
+//	)
+//
+// The get and set callbacks must use the same concrete type T. If the value returned by
+// get cannot be asserted to T when passed to set, the set callback will be skipped.
+func SetDeduplicationCallbacks[T any](c *Context, get func(ctx context.Context) T, set func(ctx context.Context, data T)) {
+	c.GetDeduplicationData = func(ctx context.Context) any {
+		return get(ctx)
+	}
+	c.SetDeduplicationData = func(ctx context.Context, data any) {
+		if typed, ok := data.(T); ok {
+			set(ctx, typed)
+		}
+	}
+}
+
+// SubgraphHeadersBuilder allows the user of the engine to "define" the headers for a subgraph request
+// Instead of going back and forth between engine & transport,
+// you can simply define a function that returns headers for a Subgraph request
+// In addition to just the header, the implementer can return a hash for the header which will be used by request deduplication
+type SubgraphHeadersBuilder interface {
+	// HeadersForSubgraph must return the headers and a hash for a Subgraph Request
+	// The hash will be used for request deduplication
+	HeadersForSubgraph(subgraphName string) (http.Header, uint64)
+	// HashAll must return the hash for all subgraph requests combined
+	HashAll() uint64
+}
+
+// HeadersForSubgraphRequest returns headers and a hash for a request that the engine will make to a subgraph
+func (c *Context) HeadersForSubgraphRequest(subgraphName string) (http.Header, uint64) {
+	if c.SubgraphHeadersBuilder == nil {
+		return nil, 0
+	}
+	return c.SubgraphHeadersBuilder.HeadersForSubgraph(subgraphName)
 }
 
 type ExecutionOptions struct {
-	SkipLoader                 bool
+	// SkipLoader will, as the name indicates, skip loading data
+	// However, it does indeed resolve a response
+	// This can be useful, e.g. in combination with IncludeQueryPlanInResponse
+	// The purpose is to get a QueryPlan (even for Subscriptions)
+	SkipLoader bool
+	// IncludeQueryPlanInResponse generates a QueryPlan as part of the response in Resolvable
 	IncludeQueryPlanInResponse bool
-	SendHeartbeat              bool
+	// SendHeartbeat sends regular HeartBeats for Subscriptions
+	SendHeartbeat bool
+	// DisableSubgraphRequestDeduplication disables deduplication of requests to the same subgraph with the same input within a single operation execution.
+	DisableSubgraphRequestDeduplication bool
+	// DisableInboundRequestDeduplication disables deduplication of inbound client requests
+	// The engine is hashing the normalized operation, variables, and forwarded headers to achieve robust deduplication
+	// By default, overhead is negligible and as such this should be false (not disabled) most of the time
+	// However, if you're benchmarking internals of the engine, it can be helpful to switch it off
+	// When disabled (set to true) the code becomes a no-op
+	DisableInboundRequestDeduplication bool
 }
 
 type FieldValue struct {
@@ -159,11 +247,14 @@ func (c *Context) SubgraphErrors() error {
 }
 
 func (c *Context) appendSubgraphErrors(ds DataSourceInfo, errs ...error) {
+	if c.subgraphErrors == nil {
+		c.subgraphErrors = make(map[string]error)
+	}
 	c.subgraphErrors[ds.Name] = errors.Join(c.subgraphErrors[ds.Name], errors.Join(errs...))
 }
 
 type Request struct {
-	ID     string
+	ID     uint64
 	Header http.Header
 }
 
@@ -172,8 +263,7 @@ func NewContext(ctx context.Context) *Context {
 		panic("nil context.Context")
 	}
 	return &Context{
-		ctx:            ctx,
-		subgraphErrors: make(map[string]error),
+		ctx: ctx,
 	}
 }
 
@@ -203,16 +293,12 @@ func (c *Context) clone(ctx context.Context) *Context {
 
 	if c.RemapVariables != nil {
 		cpy.RemapVariables = make(map[string]string, len(c.RemapVariables))
-		for k, v := range c.RemapVariables {
-			cpy.RemapVariables[k] = v
-		}
+		maps.Copy(cpy.RemapVariables, c.RemapVariables)
 	}
 
 	if c.subgraphErrors != nil {
 		cpy.subgraphErrors = make(map[string]error, len(c.subgraphErrors))
-		for k, v := range c.subgraphErrors {
-			cpy.subgraphErrors[k] = v
-		}
+		maps.Copy(cpy.subgraphErrors, c.subgraphErrors)
 	}
 
 	return &cpy
@@ -230,6 +316,13 @@ func (c *Context) Free() {
 	c.subgraphErrors = nil
 	c.authorizer = nil
 	c.LoaderHooks = nil
+	c.GetDeduplicationData = nil
+	c.SetDeduplicationData = nil
+	c.TypeNameStats = nil
+}
+
+func (c *Context) VariablesView() VariablesView {
+	return NewVariablesView(c.Variables, c.RemapVariables)
 }
 
 type traceStartKey struct{}

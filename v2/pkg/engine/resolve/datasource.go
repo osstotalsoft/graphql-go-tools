@@ -1,8 +1,8 @@
 package resolve
 
 import (
-	"bytes"
 	"context"
+	"net/http"
 
 	"github.com/cespare/xxhash/v2"
 
@@ -10,21 +10,17 @@ import (
 )
 
 type DataSource interface {
-	Load(ctx context.Context, input []byte, out *bytes.Buffer) (err error)
-	LoadWithFiles(ctx context.Context, input []byte, files []*httpclient.FileUpload, out *bytes.Buffer) (err error)
+	Load(ctx context.Context, headers http.Header, input []byte) (data []byte, err error)
+	LoadWithFiles(ctx context.Context, headers http.Header, input []byte, files []*httpclient.FileUpload) (data []byte, err error)
 }
 
 type SubscriptionDataSource interface {
 	// Start is called when a new subscription is created. It establishes the connection to the data source.
 	// The updater is used to send updates to the client. Deduplication of the request must be done before calling this method.
-	Start(ctx *Context, input []byte, updater SubscriptionUpdater) error
-	UniqueRequestID(ctx *Context, input []byte, xxh *xxhash.Digest) (err error)
-}
-
-type AsyncSubscriptionDataSource interface {
-	AsyncStart(ctx *Context, id uint64, input []byte, updater SubscriptionUpdater) error
-	AsyncStop(id uint64)
-	UniqueRequestID(ctx *Context, input []byte, xxh *xxhash.Digest) (err error)
+	Start(ctx *Context, headers http.Header, input []byte, updater SubscriptionUpdater) error
+	// HashTriggerInput writes identity-relevant fields of the subscription into xxh.
+	// The resolver appends the subgraph headers hash afterward to produce the final trigger ID.
+	HashTriggerInput(input []byte, xxh *xxhash.Digest) error
 }
 
 // HookableSubscriptionDataSource is a hookable interface for subscription data sources.
@@ -37,4 +33,14 @@ type HookableSubscriptionDataSource interface {
 	// SubscriptionOnStart is called when a new subscription is created
 	// If an error is returned, the error is propagated to the client.
 	SubscriptionOnStart(ctx StartupHookContext, input []byte) (err error)
+}
+
+// HookablePubsubDatasource is an extension of HookableSubscriptionDataSource for pubsub datasources.
+// They contain additional hooks which make sense for pubsub based datasources but not for normal
+// subscription based datasources.
+type HookablePubsubDatasource interface {
+	HookableSubscriptionDataSource
+	// SubscriptionOnCreate is called right before the trigger gets generated.
+	// It lets a source rewrite the subscription event configuration.
+	SubscriptionOnCreate(ctx context.Context, input []byte) (newInput []byte, err error)
 }
